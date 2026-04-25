@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login - WA Bot</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    .login-page {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    }
+    .login-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);
+      text-align: center;
+    }
+    .login-card .brand {
+      justify-content: center;
+      border: none;
+      padding: 0;
+      margin-bottom: 24px;
+      font-size: 1.5rem;
+    }
+    .login-card h2 {
+      margin-bottom: 24px;
+      font-size: 1.25rem;
+      color: var(--text-muted);
+    }
+    .login-card .form-group {
+      text-align: left;
+      margin-bottom: 16px;
+    }
+    .login-card input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+    }
+    .login-card input:focus { border-color: var(--primary); }
+    .login-card button {
+      width: 100%;
+      padding: 12px;
+      font-size: 1rem;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="brand">
+        <i class="fa-brands fa-whatsapp"></i>
+        <span>WA Admin Bot</span>
+      </div>
+      <h2>Admin Login</h2>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="loginPassword" placeholder="Enter admin password" onkeypress="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="btn btn-primary" onclick="doLogin()">
+        <i class="fa-solid fa-lock"></i> Login
+      </button>
+    </div>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script>
+    function showToast(message, type = "success") {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.className = "toast " + type + " show";
+      setTimeout(() => toast.classList.remove("show"), 3000);
+    }
+    async function doLogin() {
+      const password = document.getElementById("loginPassword").value;
+      if (!password) { showToast("Enter password", "error"); return; }
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if (data.success) {
+          localStorage.setItem("authToken", data.token);
+          window.location.href = "/";
+        } else {
+          showToast(data.error || "Login failed", "error");
+        }
+      } catch (err) {
+        showToast("Login error", "error");
+      }
+    }
+  </script>
+</body>
+</html>

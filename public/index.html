@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Admin Bot Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <i class="fa-brands fa-whatsapp"></i>
+        <span>WA Admin Bot</span>
+      </div>
+      <nav>
+        <a href="#" class="active" onclick="switchTab('dashboard', this)"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        <a href="#" onclick="switchTab('groups', this)"><i class="fa-solid fa-users"></i> Groups</a>
+        <a href="#" onclick="switchTab('sessions', this)"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
+        <a href="#" onclick="switchTab('settings', this)"><i class="fa-solid fa-gear"></i> Settings</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="btn btn-danger btn-sm" style="width:100%;margin:0;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
+        <small style="display:block;margin-top:8px;">v2.0.0</small>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <h2 id="pageTitle">Dashboard</h2>
+        <div class="topbar-actions">
+          <span class="live-indicator"><span class="dot"></span> Live</span>
+        </div>
+      </header>
+
+      <!-- Dashboard Tab -->
+      <section id="tab-dashboard" class="tab active">
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon bg-blue"><i class="fa-solid fa-users"></i></div>
+            <div class="stat-info">
+              <h3 id="statGroups">0</h3>
+              <p>Total Groups</p>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon bg-green"><i class="fa-solid fa-bolt"></i></div>
+            <div class="stat-info">
+              <h3 id="statActive">0</h3>
+              <p>Active Sessions</p>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon bg-purple"><i class="fa-solid fa-file-excel"></i></div>
+            <div class="stat-info">
+              <h3 id="statEnded">0</h3>
+              <p>Excel Ready Today</p>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon bg-orange"><i class="fa-solid fa-message"></i></div>
+            <div class="stat-info">
+              <h3 id="statMessages">0</h3>
+              <p>Messages Today</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Groups Table -->
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-list"></i> Group Status Overview</h3>
+            <div class="search-box">
+              <i class="fa-solid fa-search"></i>
+              <input type="text" id="searchInput" placeholder="Search groups..." oninput="filterGroups()">
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Group Code</th>
+                  <th>Time Slots</th>
+                  <th>Status</th>
+                  <th>Slot</th>
+                  <th>Messages</th>
+                  <th>Owner</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardTable">
+                <tr><td colspan="7" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Groups Tab -->
+      <section id="tab-groups" class="tab">
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-plus-circle"></i> Add New Group</h3>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Group Code</label>
+              <input type="text" id="groupCode" placeholder="e.g. BA1406" maxlength="20">
+            </div>
+            <div class="form-group">
+              <label>Time Slots</label>
+              <div class="checkbox-group">
+                <label class="checkbox-label"><input type="checkbox" value="1PM"> 1PM</label>
+                <label class="checkbox-label"><input type="checkbox" value="3PM"> 3PM</label>
+                <label class="checkbox-label"><input type="checkbox" value="6PM"> 6PM</label>
+                <label class="checkbox-label"><input type="checkbox" value="8PM"> 8PM</label>
+              </div>
+            </div>
+            <div class="form-group form-actions">
+              <button class="btn btn-primary" onclick="addGroup()"><i class="fa-solid fa-plus"></i> Add Group</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-users"></i> All Groups</h3>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+            <th>Code</th>
+                  <th>Time Slots</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="groupsTable">
+                <tr><td colspan="4" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- All Sessions Tab -->
+      <section id="tab-sessions" class="tab">
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-clock-rotate-left"></i> Session History</h3>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <div class="search-box">
+                <input type="date" id="sessionDate" onchange="loadAllSessions()">
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="downloadMasterReport()"><i class="fa-solid fa-file-excel"></i> Master Report</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Group</th>
+                  <th>Slot</th>
+                  <th>Status</th>
+                  <th>Messages</th>
+                  <th>Owner</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="sessionsTable">
+                <tr><td colspan="8" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Tab -->
+      <section id="tab-settings" class="tab">
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-shield-halved"></i> Change Admin Password</h3>
+          </div>
+          <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr auto;">
+            <div class="form-group">
+              <label>Current Password</label>
+              <input type="password" id="currentPassword" placeholder="Current password">
+            </div>
+            <div class="form-group">
+              <label>New Password</label>
+              <input type="password" id="newPassword" placeholder="New password">
+            </div>
+            <div class="form-group">
+              <label>Confirm New Password</label>
+              <input type="password" id="confirmPassword" placeholder="Confirm new password">
+            </div>
+            <div class="form-group form-actions">
+              <button class="btn btn-primary" onclick="changePassword()"><i class="fa-solid fa-key"></i> Update</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> Factory Reset</h3>
+          </div>
+          <div style="padding:20px 24px;">
+            <p style="color:var(--text-muted);margin-bottom:16px;">
+              This will permanently delete all groups, sessions, messages, and exported Excel files. This action cannot be undone.
+            </p>
+            <button class="btn btn-danger" onclick="showResetModal()"><i class="fa-solid fa-trash"></i> Factory Reset</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Edit Group Modal -->
+  <div class="modal" id="editModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Edit Group</h3>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editOldCode">
+        <div class="form-group">
+          <label>Group Code</label>
+          <input type="text" id="editCode" placeholder="Group Code">
+        </div>
+        <div class="form-group">
+          <label>Time Slots</label>
+          <div class="checkbox-group" id="editCheckboxes">
+            <label class="checkbox-label"><input type="checkbox" value="1PM"> 1PM</label>
+            <label class="checkbox-label"><input type="checkbox" value="3PM"> 3PM</label>
+            <label class="checkbox-label"><input type="checkbox" value="6PM"> 6PM</label>
+            <label class="checkbox-label"><input type="checkbox" value="8PM"> 8PM</label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEditGroup()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast"></div>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

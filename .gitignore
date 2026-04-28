@@ -1,5 +1,6 @@
 node_modules
 .env
 exports/*.xlsx
+exports/*.xlsm
 .DS_Store
 *.log

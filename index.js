@@ -30,7 +30,8 @@ function emitUpdate() {
 }
 
 const EXPORTS_DIR = path.join(__dirname, "exports");
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const SESSION_TEMPLATE_PATH = path.join(__dirname, "template_excel", "lottery_output.xlsm");
+const XLSM_MIME = "application/vnd.ms-excel.sheet.macroEnabled.12";
 
 function ensureExportsDir() {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
@@ -41,9 +42,9 @@ async function uploadWhatsAppMediaForDocument(filePath, fileName) {
   form.append("messaging_product", "whatsapp");
   form.append("file", fs.createReadStream(filePath), {
     filename: fileName,
-    contentType: XLSX_MIME,
+    contentType: XLSM_MIME,
   });
-  form.append("type", XLSX_MIME);
+  form.append("type", XLSM_MIME);
 
   const { data } = await axios.post(
     `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/media`,
@@ -83,6 +84,45 @@ async function sendWhatsAppDocumentMessage(to, mediaId, fileName, caption) {
       },
     }
   );
+}
+
+function buildSessionWorkbookFromTemplate(messages) {
+  if (!fs.existsSync(SESSION_TEMPLATE_PATH)) {
+    throw new Error(`Session template not found: ${SESSION_TEMPLATE_PATH}`);
+  }
+
+  const wb = XLSX.readFile(SESSION_TEMPLATE_PATH, {
+    bookVBA: true,
+    cellFormula: true,
+    cellStyles: true,
+    cellDates: true,
+  });
+
+  const ws = wb.Sheets.Raw_Output;
+  if (!ws) {
+    throw new Error("Template sheet 'Raw_Output' not found");
+  }
+
+  let range = ws["!ref"]
+    ? XLSX.utils.decode_range(ws["!ref"])
+    : { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } };
+
+  // Keep headers/formulas/macros intact; only replace input rows under SI.NO/Input columns.
+  for (let r = 1; r <= range.e.r; r++) {
+    delete ws[XLSX.utils.encode_cell({ r, c: 0 })];
+    delete ws[XLSX.utils.encode_cell({ r, c: 1 })];
+  }
+
+  messages.forEach((m, i) => {
+    ws[XLSX.utils.encode_cell({ r: i + 1, c: 0 })] = { t: "n", v: i + 1 };
+    ws[XLSX.utils.encode_cell({ r: i + 1, c: 1 })] = { t: "s", v: m.content || "" };
+  });
+
+  range.e.r = Math.max(range.e.r, messages.length);
+  range.e.c = Math.max(range.e.c, 1);
+  ws["!ref"] = XLSX.utils.encode_range(range);
+
+  return wb;
 }
 
 // ---------------- AUTH MIDDLEWARE ----------------
@@ -229,21 +269,17 @@ async function finishSession(from) {
   }
 
   const messages = await db.getMessages(session.id);
-  const data = messages.map((m, i) => ({ SNo: i + 1, Message: m.content }));
+  const wb = buildSessionWorkbookFromTemplate(messages);
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ SNo: "-", Message: "(no messages)" }]);
-  XLSX.utils.book_append_sheet(wb, ws, "Messages");
-
-  const fileName = `${session.id}_${session.group_code}_${today()}_${session.slot}.xlsx`;
+  const fileName = `${session.id}_${session.group_code}_${today()}_${session.slot}.xlsm`;
   ensureExportsDir();
   const filePath = path.join(EXPORTS_DIR, fileName);
-  XLSX.writeFile(wb, filePath);
+  XLSX.writeFile(wb, filePath, { bookType: "xlsm", bookVBA: true });
 
   await db.endSession(session.id, filePath);
   emitUpdate();
 
-  const caption = `✅ ${data.length} message(s)`;
+  const caption = `✅ ${messages.length} message(s)`;
   try {
     const mediaId = await uploadWhatsAppMediaForDocument(filePath, fileName);
     await sendWhatsAppDocumentMessage(from, mediaId, fileName, caption);
@@ -251,7 +287,7 @@ async function finishSession(from) {
     console.error("finishSession document send:", err.response?.data || err.message || err);
     await sendText(
       from,
-      `✅ Excel saved: ${fileName}\nMessages: ${data.length}\n` +
+      `✅ Excel saved: ${fileName}\nMessages: ${messages.length}\n` +
         `Download: open your web dashboard → Sessions tab → Excel button.\n` +
         `(If you expected the file here, check server logs — Meta media upload may need permissions.)`
     );
@@ -506,7 +542,7 @@ app.post("/api/settings/reset", requireAuth, async (req, res) => {
     const exportsDir = EXPORTS_DIR;
     const files = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir) : [];
     for (const file of files) {
-      if (file.endsWith(".xlsx")) {
+      if (file.endsWith(".xlsx") || file.endsWith(".xlsm")) {
         fs.unlinkSync(path.join(exportsDir, file));
       }
     }

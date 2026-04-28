@@ -1,0 +1,18 @@
+{
+  "name": "WhatsApp Admin Bot Dashboard",
+  "short_name": "WA Admin Bot",
+  "description": "Admin dashboard for WhatsApp session tracking and Excel exports.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

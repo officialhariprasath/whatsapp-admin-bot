@@ -49,6 +49,13 @@
           <span class="live-indicator"><span class="dot"></span> Live</span>
         </div>
       </header>
+      <div id="updateBanner" class="update-banner" style="display:none;">
+        <span><i class="fa-solid fa-cloud-arrow-down"></i> New version available</span>
+        <div class="actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="applyPwaUpdate()">Update now</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="dismissPwaUpdate()">Later</button>
+        </div>
+      </div>
 
       <!-- Dashboard Tab -->
       <section id="tab-dashboard" class="tab active">

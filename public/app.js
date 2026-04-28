@@ -5,6 +5,9 @@ let allGroupsData = [];
 let agentsData = [];
 let currentSearch = "";
 let deferredInstallPrompt = null;
+let pwaUpdatePending = false;
+let pwaUpdateDismissed = false;
+let lastUserActivityAt = Date.now();
 const userRole = localStorage.getItem("userRole") || "admin";
 
 function getAuthHeaders() {
@@ -150,12 +153,74 @@ document.addEventListener("DOMContentLoaded", async () => {
   checkAuth();
   applyRoleUI();
   setupInstallPrompt();
+  setupPwaUpdateUX();
   document.getElementById("sessionDate").value = new Date().toISOString().split("T")[0];
   if (userRole === "admin") await loadAgents();
   await loadDashboard();
   if (userRole === "admin") await loadGroupsPage();
   await loadAllSessions();
 });
+
+function setupPwaUpdateUX() {
+  ["click", "keydown", "touchstart", "mousemove", "scroll"].forEach((ev) => {
+    window.addEventListener(
+      ev,
+      () => {
+        lastUserActivityAt = Date.now();
+      },
+      { passive: true }
+    );
+  });
+
+  document.addEventListener("pwa:update-available", () => {
+    pwaUpdatePending = true;
+    pwaUpdateDismissed = false;
+    showUpdateBanner();
+  });
+
+  document.addEventListener("pwa:update-applied", () => {
+    pwaUpdatePending = false;
+    hideUpdateBanner();
+  });
+
+  // Safe auto-refresh: only when update is pending, visible tab, and idle for 60s.
+  setInterval(() => {
+    if (!pwaUpdatePending || pwaUpdateDismissed) return;
+    if (document.hidden) return;
+    const idleMs = Date.now() - lastUserActivityAt;
+    if (idleMs >= 60_000) {
+      applyPwaUpdate();
+    }
+  }, 10_000);
+}
+
+function showUpdateBanner() {
+  const b = document.getElementById("updateBanner");
+  if (!b) return;
+  b.style.display = "flex";
+}
+
+function hideUpdateBanner() {
+  const b = document.getElementById("updateBanner");
+  if (!b) return;
+  b.style.display = "none";
+}
+
+function dismissPwaUpdate() {
+  pwaUpdateDismissed = true;
+  hideUpdateBanner();
+}
+
+function applyPwaUpdate() {
+  try {
+    const ok = typeof window.__applyPwaUpdate === "function" && window.__applyPwaUpdate();
+    if (!ok) {
+      showToast("Checking for update... please try again in a moment.", "error");
+    }
+  } catch {
+    showToast("Unable to apply update right now.", "error");
+  }
+}
 
 async function loadDashboard() {
   try {

@@ -130,16 +130,105 @@ async function initTables() {
       ]);
     }
 
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS agents (
+        id SERIAL PRIMARY KEY,
+        phone VARCHAR(50) NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        session_token VARCHAR(128),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS group_agents (
+        group_code VARCHAR(50) NOT NULL REFERENCES groups_table(code) ON DELETE CASCADE,
+        agent_id INT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        PRIMARY KEY (group_code, agent_id)
+      )
+    `);
+
+    await conn.query(
+      "CREATE INDEX IF NOT EXISTS idx_group_agents_agent_id ON group_agents(agent_id)"
+    );
+
     console.log("✅ Database tables initialized");
   } finally {
     conn.release();
   }
 }
 
-// Groups
+function parseAgentIds(row) {
+  const v = row.agent_ids;
+  if (v == null) return [];
+  if (Array.isArray(v)) return v.map(Number).filter((n) => !Number.isNaN(n));
+  if (typeof v === "string") {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p.map(Number) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+// Groups (includes agent_ids for admin UI)
 async function getGroups() {
-  const { rows } = await pool.query("SELECT * FROM groups_table ORDER BY created_at DESC");
-  return rows.map((r) => ({ ...r, times: parseTimes(r) }));
+  const { rows } = await pool.query(`
+    SELECT g.code, g.times, g.created_at,
+      COALESCE(
+        (SELECT json_agg(ga.agent_id ORDER BY ga.agent_id)
+         FROM group_agents ga WHERE ga.group_code = g.code),
+        '[]'::json
+      ) AS agent_ids
+    FROM groups_table g
+    ORDER BY g.created_at DESC
+  `);
+  return rows.map((r) => ({ ...r, times: parseTimes(r), agent_ids: parseAgentIds(r) }));
+}
+
+async function getGroupsForAgent(agentId) {
+  const { rows } = await pool.query(
+    `
+    SELECT g.code, g.times, g.created_at,
+      COALESCE(
+        (SELECT json_agg(ga2.agent_id ORDER BY ga2.agent_id)
+         FROM group_agents ga2 WHERE ga2.group_code = g.code),
+        '[]'::json
+      ) AS agent_ids
+    FROM groups_table g
+    INNER JOIN group_agents ga ON ga.group_code = g.code AND ga.agent_id = $1
+    ORDER BY g.created_at DESC
+  `,
+    [agentId]
+  );
+  return rows.map((r) => ({ ...r, times: parseTimes(r), agent_ids: parseAgentIds(r) }));
+}
+
+/** Groups visible on WhatsApp: unassigned groups OR groups linked to this phone's agent record. */
+async function getGroupsForWhatsappPhone(phoneDigits) {
+  const { rows } = await pool.query(
+    `
+    SELECT DISTINCT g.code, g.times, g.created_at,
+      COALESCE(
+        (SELECT json_agg(ga2.agent_id ORDER BY ga2.agent_id)
+         FROM group_agents ga2 WHERE ga2.group_code = g.code),
+        '[]'::json
+      ) AS agent_ids
+    FROM groups_table g
+    WHERE NOT EXISTS (SELECT 1 FROM group_agents ga0 WHERE ga0.group_code = g.code)
+       OR EXISTS (
+         SELECT 1 FROM group_agents ga3
+         INNER JOIN agents a ON a.id = ga3.agent_id
+         WHERE ga3.group_code = g.code
+           AND regexp_replace(a.phone, '\\D', '', 'g') = $1
+       )
+    ORDER BY g.created_at DESC
+  `,
+    [phoneDigits]
+  );
+  return rows.map((r) => ({ ...r, times: parseTimes(r), agent_ids: parseAgentIds(r) }));
 }
 
 async function getGroup(code) {
@@ -148,19 +237,61 @@ async function getGroup(code) {
   return { ...rows[0], times: parseTimes(rows[0]) };
 }
 
-async function addGroup(code, times) {
+async function setGroupAgents(groupCode, agentIds) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM group_agents WHERE group_code = $1", [groupCode]);
+    for (const id of agentIds || []) {
+      const n = Number(id);
+      if (!Number.isFinite(n)) continue;
+      await client.query(
+        "INSERT INTO group_agents (group_code, agent_id) VALUES ($1, $2) ON CONFLICT (group_code, agent_id) DO NOTHING",
+        [groupCode, n]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function addGroup(code, times, agentIds = []) {
   await pool.query("INSERT INTO groups_table (code, times) VALUES ($1, $2::jsonb)", [
     code,
     JSON.stringify(times),
   ]);
+  await setGroupAgents(code, agentIds);
 }
 
-async function updateGroup(oldCode, newCode, times) {
-  await pool.query("UPDATE groups_table SET code = $1, times = $2::jsonb WHERE code = $3", [
-    newCode,
-    JSON.stringify(times),
-    oldCode,
-  ]);
+async function updateGroup(oldCode, newCode, times, agentIds) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (oldCode !== newCode) {
+      await client.query("UPDATE group_agents SET group_code = $1 WHERE group_code = $2", [
+        newCode,
+        oldCode,
+      ]);
+    }
+    await client.query("UPDATE groups_table SET code = $1, times = $2::jsonb WHERE code = $3", [
+      newCode,
+      JSON.stringify(times),
+      oldCode,
+    ]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  if (agentIds !== undefined) {
+    await setGroupAgents(newCode, agentIds);
+  }
 }
 
 async function deleteGroup(code) {
@@ -286,6 +417,127 @@ async function getDashboardStats(session_date) {
   };
 }
 
+async function getDashboardStatsForAgent(agentId, session_date) {
+  const { rows: groupCount } = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM group_agents WHERE agent_id = $1",
+    [agentId]
+  );
+  const { rows: activeSessions } = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM sessions s
+     INNER JOIN group_agents ga ON ga.group_code = s.group_code AND ga.agent_id = $1
+     WHERE s.session_date = $2 AND s.status IN ('started','receiving')`,
+    [agentId, session_date]
+  );
+  const { rows: endedToday } = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM sessions s
+     INNER JOIN group_agents ga ON ga.group_code = s.group_code AND ga.agent_id = $1
+     WHERE s.session_date = $2 AND s.status = 'excel_ready'`,
+    [agentId, session_date]
+  );
+  const { rows: totalMessages } = await pool.query(
+    `SELECT COALESCE(SUM(s.message_count),0)::bigint AS count FROM sessions s
+     INNER JOIN group_agents ga ON ga.group_code = s.group_code AND ga.agent_id = $1
+     WHERE s.session_date = $2`,
+    [agentId, session_date]
+  );
+  return {
+    totalGroups: groupCount[0].count,
+    activeSessions: activeSessions[0].count,
+    endedToday: endedToday[0].count,
+    totalMessagesToday: Number(totalMessages[0].count),
+  };
+}
+
+async function getSessionsForAgent(agentId, date) {
+  if (date) {
+    const { rows } = await pool.query(
+      `SELECT s.* FROM sessions s
+       INNER JOIN group_agents ga ON ga.group_code = s.group_code AND ga.agent_id = $1
+       WHERE s.session_date = $2::date
+       ORDER BY s.created_at DESC`,
+      [agentId, date]
+    );
+    return rows;
+  }
+  const { rows } = await pool.query(
+    `SELECT s.* FROM sessions s
+     INNER JOIN group_agents ga ON ga.group_code = s.group_code AND ga.agent_id = $1
+     ORDER BY s.created_at DESC`,
+    [agentId]
+  );
+  return rows;
+}
+
+async function agentCanAccessGroup(agentId, groupCode) {
+  const { rows } = await pool.query(
+    "SELECT 1 FROM group_agents WHERE agent_id = $1 AND group_code = $2 LIMIT 1",
+    [agentId, groupCode]
+  );
+  return rows.length > 0;
+}
+
+// Agents
+async function listAgents() {
+  const { rows } = await pool.query(
+    "SELECT id, phone, created_at FROM agents ORDER BY id ASC"
+  );
+  return rows;
+}
+
+async function createAgent(phone, passwordHash) {
+  const { rows } = await pool.query(
+    "INSERT INTO agents (phone, password_hash) VALUES ($1, $2) RETURNING id, phone, created_at",
+    [phone, passwordHash]
+  );
+  return rows[0];
+}
+
+async function getAgentById(id) {
+  const { rows } = await pool.query("SELECT id, phone, created_at FROM agents WHERE id = $1", [id]);
+  return rows[0] || null;
+}
+
+async function getAgentByPhoneDigits(phoneDigits) {
+  const { rows } = await pool.query(
+    "SELECT * FROM agents WHERE regexp_replace(phone, '\\D', '', 'g') = $1 LIMIT 1",
+    [phoneDigits]
+  );
+  return rows[0] || null;
+}
+
+async function getAgentBySessionToken(token) {
+  if (!token) return null;
+  const { rows } = await pool.query(
+    "SELECT id, phone, created_at FROM agents WHERE session_token = $1 LIMIT 1",
+    [token]
+  );
+  return rows[0] || null;
+}
+
+async function getAgentWithHash(id) {
+  const { rows } = await pool.query("SELECT * FROM agents WHERE id = $1", [id]);
+  return rows[0] || null;
+}
+
+async function setAgentSessionToken(agentId, token) {
+  await pool.query("UPDATE agents SET session_token = $1 WHERE id = $2", [token, agentId]);
+}
+
+async function clearAgentSessionToken(agentId) {
+  await pool.query("UPDATE agents SET session_token = NULL WHERE id = $1", [agentId]);
+}
+
+async function updateAgentPassword(agentId, passwordHash) {
+  await pool.query("UPDATE agents SET password_hash = $1, session_token = NULL WHERE id = $2", [
+    passwordHash,
+    agentId,
+  ]);
+}
+
+async function deleteAgent(id) {
+  await pool.query("DELETE FROM agents WHERE id = $1", [id]);
+}
+
 // Settings
 async function getSetting(key) {
   const { rows } = await pool.query("SELECT value FROM settings WHERE key = $1", [key]);
@@ -305,7 +557,7 @@ async function resetDatabase() {
   const conn = await pool.connect();
   try {
     await conn.query(
-      "TRUNCATE messages, sessions, groups_table RESTART IDENTITY CASCADE"
+      "TRUNCATE messages, sessions, group_agents, agents, groups_table RESTART IDENTITY CASCADE"
     );
   } finally {
     conn.release();
@@ -317,10 +569,13 @@ module.exports = {
   init,
   initTables,
   getGroups,
+  getGroupsForAgent,
+  getGroupsForWhatsappPhone,
   getGroup,
   addGroup,
   updateGroup,
   deleteGroup,
+  setGroupAgents,
   createSession,
   getActiveSession,
   getSessionByKey,
@@ -331,8 +586,21 @@ module.exports = {
   getMessages,
   getTodaySessionForGroup,
   getDashboardStats,
+  getDashboardStatsForAgent,
+  getSessionsForAgent,
+  agentCanAccessGroup,
   getSessionsByGroup,
   getSessionsByDate,
+  listAgents,
+  createAgent,
+  getAgentById,
+  getAgentByPhoneDigits,
+  getAgentBySessionToken,
+  getAgentWithHash,
+  setAgentSessionToken,
+  clearAgentSessionToken,
+  updateAgentPassword,
+  deleteAgent,
   getSetting,
   setSetting,
   resetDatabase,

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f172a">
-  <title>Admin Login - WA Bot</title>
+  <title>Login - WA Admin Bot</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/icon-192.png">
@@ -17,33 +17,57 @@
       justify-content: center;
       min-height: 100vh;
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      padding: 16px;
     }
     .login-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 40px;
+      padding: 32px;
       width: 100%;
-      max-width: 400px;
+      max-width: 420px;
       box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);
-      text-align: center;
     }
     .login-card .brand {
       justify-content: center;
       border: none;
       padding: 0;
-      margin-bottom: 24px;
-      font-size: 1.5rem;
+      margin-bottom: 20px;
+      font-size: 1.35rem;
     }
-    .login-card h2 {
-      margin-bottom: 24px;
-      font-size: 1.25rem;
+    .login-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .login-tabs button {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
       color: var(--text-muted);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .login-tabs button.active {
+      background: rgba(59,130,246,0.2);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+    .login-panel { display: none; }
+    .login-panel.active { display: block; }
+    .login-card h2 {
+      margin-bottom: 16px;
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      text-align: center;
     }
     .login-card .form-group {
       text-align: left;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
+    .login-card label { display: block; margin-bottom: 6px; font-size: 0.875rem; color: var(--text-muted); }
     .login-card input {
       width: 100%;
       background: var(--bg);
@@ -55,7 +79,7 @@
       outline: none;
     }
     .login-card input:focus { border-color: var(--primary); }
-    .login-card button {
+    .login-card .btn-primary {
       width: 100%;
       padding: 12px;
       font-size: 1rem;
@@ -70,14 +94,36 @@
         <i class="fa-brands fa-whatsapp"></i>
         <span>WA Admin Bot</span>
       </div>
-      <h2>Admin Login</h2>
-      <div class="form-group">
-        <label>Password</label>
-        <input type="password" id="loginPassword" placeholder="Enter admin password" onkeypress="if(event.key==='Enter')doLogin()">
+      <div class="login-tabs">
+        <button type="button" id="tabAdminBtn" class="active" onclick="showLoginTab('admin')">Admin</button>
+        <button type="button" id="tabAgentBtn" onclick="showLoginTab('agent')">Agent</button>
       </div>
-      <button class="btn btn-primary" onclick="doLogin()">
-        <i class="fa-solid fa-lock"></i> Login
-      </button>
+
+      <div id="panelAdmin" class="login-panel active">
+        <h2>Admin login</h2>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="adminPassword" placeholder="Admin password" onkeypress="if(event.key==='Enter')doAdminLogin()">
+        </div>
+        <button class="btn btn-primary" onclick="doAdminLogin()">
+          <i class="fa-solid fa-lock"></i> Sign in as admin
+        </button>
+      </div>
+
+      <div id="panelAgent" class="login-panel">
+        <h2>Agent login</h2>
+        <div class="form-group">
+          <label>Phone number</label>
+          <input type="tel" id="agentPhone" placeholder="e.g. 919876543210" onkeypress="if(event.key==='Enter')doAgentLogin()">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="agentPassword" placeholder="Agent password" onkeypress="if(event.key==='Enter')doAgentLogin()">
+        </div>
+        <button class="btn btn-primary" onclick="doAgentLogin()">
+          <i class="fa-solid fa-user"></i> Sign in as agent
+        </button>
+      </div>
     </div>
   </div>
   <div id="toast" class="toast"></div>
@@ -86,25 +132,55 @@
       const toast = document.getElementById("toast");
       toast.textContent = message;
       toast.className = "toast " + type + " show";
-      setTimeout(() => toast.classList.remove("show"), 3000);
+      setTimeout(() => toast.classList.remove("show"), 3500);
     }
-    async function doLogin() {
-      const password = document.getElementById("loginPassword").value;
+    function showLoginTab(which) {
+      document.getElementById("tabAdminBtn").classList.toggle("active", which === "admin");
+      document.getElementById("tabAgentBtn").classList.toggle("active", which === "agent");
+      document.getElementById("panelAdmin").classList.toggle("active", which === "admin");
+      document.getElementById("panelAgent").classList.toggle("active", which === "agent");
+    }
+    async function doAdminLogin() {
+      const password = document.getElementById("adminPassword").value;
       if (!password) { showToast("Enter password", "error"); return; }
       try {
         const res = await fetch("/api/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ role: "admin", password }),
         });
         const data = await res.json();
-        if (data.success) {
+        if (data.success && data.role === "admin") {
           localStorage.setItem("authToken", data.token);
+          localStorage.setItem("userRole", "admin");
           window.location.href = "/";
         } else {
           showToast(data.error || "Login failed", "error");
         }
-      } catch (err) {
+      } catch (e) {
+        showToast("Login error", "error");
+      }
+    }
+    async function doAgentLogin() {
+      const phone = document.getElementById("agentPhone").value.trim();
+      const password = document.getElementById("agentPassword").value;
+      if (!phone || !password) { showToast("Enter phone and password", "error"); return; }
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "agent", phone, password }),
+        });
+        const data = await res.json();
+        if (data.success && data.role === "agent") {
+          localStorage.setItem("authToken", data.token);
+          localStorage.setItem("userRole", "agent");
+          localStorage.setItem("agentId", String(data.agentId));
+          window.location.href = "/";
+        } else {
+          showToast(data.error || "Login failed", "error");
+        }
+      } catch (e) {
         showToast("Login error", "error");
       }
     }

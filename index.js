@@ -9,6 +9,8 @@ const cors = require("cors");
 const FormData = require("form-data");
 const JSZip = require("jszip");
 const { XMLParser, XMLBuilder } = require("fast-xml-parser");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 require("dotenv").config();
 
 const db = require("./db");
@@ -189,14 +191,41 @@ async function buildSessionWorkbookFromTemplate(messages, outputPath) {
   fs.writeFileSync(outputPath, outBuffer);
 }
 
+function normalizePhoneDigits(phone) {
+  return String(phone || "").replace(/\D/g, "");
+}
+
 // ---------------- AUTH MIDDLEWARE ----------------
-async function requireAuth(req, res, next) {
+async function resolveUser(req, res, next) {
   const token = req.headers["x-auth-token"] || req.query.token;
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   const adminPassword = await db.getSetting("admin_password");
   if (token === adminPassword) {
+    req.user = { role: "admin" };
+    return next();
+  }
+  const agent = await db.getAgentBySessionToken(token);
+  if (agent) {
+    req.user = { role: "agent", agentId: agent.id, phone: agent.phone };
     return next();
   }
   res.status(401).json({ error: "Unauthorized" });
+}
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ error: "Admin only" });
+  }
+  next();
+}
+
+function requireAgent(req, res, next) {
+  if (req.user?.role !== "agent") {
+    return res.status(403).json({ error: "Agent only" });
+  }
+  next();
 }
 
 // ---------------- WEBHOOK VERIFY ----------------
@@ -247,13 +276,22 @@ app.post("/webhook", async (req, res) => {
         const group = userState[from]?.group;
         if (!group) return res.sendStatus(200);
 
-        const existing = await db.getSessionByKey(group, slot, today());
-        if (existing && ["started", "receiving"].includes(existing.status)) {
-          await sendText(from, `${group} for ${slot} is already active by another admin.`);
+        const digits = normalizePhoneDigits(from);
+        const agentRow = await db.getAgentByPhoneDigits(digits);
+        if (agentRow && !(await db.agentCanAccessGroup(agentRow.id, group))) {
+          await sendText(from, "You are not assigned to this group.");
         } else {
-          await db.createSession(group, slot, from, today());
-          await sendText(from, `✅ Session started for ${group} - ${slot}\nForward messages now.\nSend /end when finished.`);
-          emitUpdate();
+          const existing = await db.getSessionByKey(group, slot, today());
+          if (existing && ["started", "receiving"].includes(existing.status)) {
+            await sendText(from, `${group} for ${slot} is already active by another admin.`);
+          } else {
+            await db.createSession(group, slot, from, today());
+            await sendText(
+              from,
+              `✅ Session started for ${group} - ${slot}\nForward messages now.\nSend /end when finished.`
+            );
+            emitUpdate();
+          }
         }
       }
     }
@@ -268,8 +306,16 @@ app.post("/webhook", async (req, res) => {
 
 // ---------------- SEND GROUP LIST ----------------
 async function sendGroupList(to) {
-  const groups = await db.getGroups();
+  const digits = normalizePhoneDigits(to);
+  const agentRow = await db.getAgentByPhoneDigits(digits);
+  const groups = agentRow
+    ? await db.getGroupsForWhatsappPhone(digits)
+    : await db.getGroups();
   const rows = groups.map((g) => ({ id: "GROUP_" + g.code, title: g.code }));
+  if (!rows.length) {
+    await sendText(to, "No groups available for your account. Ask an admin to assign you to groups.");
+    return;
+  }
   await sendList(to, "Select Group", "Choose group", rows);
 }
 
@@ -277,6 +323,12 @@ async function sendGroupList(to) {
 async function sendTimeList(to, code) {
   const group = await db.getGroup(code);
   if (!group) return;
+  const digits = normalizePhoneDigits(to);
+  const agentRow = await db.getAgentByPhoneDigits(digits);
+  if (agentRow && !(await db.agentCanAccessGroup(agentRow.id, code))) {
+    await sendText(to, "You are not assigned to this group.");
+    return;
+  }
   const rows = group.times.map((t) => ({ id: "TIME_" + t, title: t }));
   await sendList(to, `Timings for ${code}`, "Choose slot", rows);
 }
@@ -359,35 +411,61 @@ async function finishSession(from) {
 // ---------------- AUTH: LOGIN ----------------
 app.post("/api/login", async (req, res) => {
   try {
-    const { password } = req.body;
+    const { role, password, phone } = req.body || {};
+    if (role === "agent" || (phone && !role)) {
+      const digits = normalizePhoneDigits(phone);
+      if (!digits || !password) {
+        return res.status(400).json({ error: "Phone and password required" });
+      }
+      const found = await db.getAgentByPhoneDigits(digits);
+      if (!found) {
+        return res.status(401).json({ error: "Invalid phone or password" });
+      }
+      const full = await db.getAgentWithHash(found.id);
+      if (!bcrypt.compareSync(password, full.password_hash)) {
+        return res.status(401).json({ error: "Invalid phone or password" });
+      }
+      const sessionToken = crypto.randomBytes(32).toString("hex");
+      await db.setAgentSessionToken(found.id, sessionToken);
+      return res.json({
+        success: true,
+        role: "agent",
+        token: sessionToken,
+        agentId: found.id,
+        phone: found.phone,
+      });
+    }
+
     const adminPassword = await db.getSetting("admin_password");
     if (password === adminPassword) {
-      res.json({ success: true, token: adminPassword });
-    } else {
-      res.status(401).json({ error: "Invalid password" });
+      return res.json({ success: true, role: "admin", token: adminPassword });
     }
+    res.status(401).json({ error: "Invalid password" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // ---------------- API: GROUPS (Protected) ----------------
-app.get("/api/groups", requireAuth, async (req, res) => {
+app.get("/api/groups", resolveUser, async (req, res) => {
   try {
-    const groups = await db.getGroups();
+    const groups =
+      req.user.role === "admin"
+        ? await db.getGroups()
+        : await db.getGroupsForAgent(req.user.agentId);
     res.json(groups);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post("/api/groups", requireAuth, async (req, res) => {
+app.post("/api/groups", resolveUser, requireAdmin, async (req, res) => {
   try {
-    const { code, times } = req.body;
+    const { code, times, agentIds } = req.body;
     if (!code || !Array.isArray(times) || times.length === 0) {
       return res.status(400).json({ error: "Invalid group data" });
     }
-    await db.addGroup(code.trim().toUpperCase(), times);
+    await db.addGroup(code.trim().toUpperCase(), times, Array.isArray(agentIds) ? agentIds : []);
     emitUpdate();
     res.json({ success: true });
   } catch (err) {
@@ -395,13 +473,18 @@ app.post("/api/groups", requireAuth, async (req, res) => {
   }
 });
 
-app.put("/api/groups/:code", requireAuth, async (req, res) => {
+app.put("/api/groups/:code", resolveUser, requireAdmin, async (req, res) => {
   try {
-    const { newCode, times } = req.body;
+    const { newCode, times, agentIds } = req.body;
     if (!newCode || !Array.isArray(times) || times.length === 0) {
       return res.status(400).json({ error: "Invalid group data" });
     }
-    await db.updateGroup(req.params.code, newCode.trim().toUpperCase(), times);
+    await db.updateGroup(
+      req.params.code,
+      newCode.trim().toUpperCase(),
+      times,
+      Array.isArray(agentIds) ? agentIds : undefined
+    );
     emitUpdate();
     res.json({ success: true });
   } catch (err) {
@@ -409,7 +492,7 @@ app.put("/api/groups/:code", requireAuth, async (req, res) => {
   }
 });
 
-app.delete("/api/groups/:code", requireAuth, async (req, res) => {
+app.delete("/api/groups/:code", resolveUser, requireAdmin, async (req, res) => {
   try {
     await db.deleteGroup(req.params.code);
     emitUpdate();
@@ -420,21 +503,24 @@ app.delete("/api/groups/:code", requireAuth, async (req, res) => {
 });
 
 // ---------------- API: DASHBOARD ----------------
-app.get("/api/dashboard/sessions", requireAuth, async (req, res) => {
+app.get("/api/dashboard/sessions", resolveUser, async (req, res) => {
   try {
     const date = req.query.date || today();
     const sessions = await db.getSessions(date);
 
-    const groups = await db.getGroups();
+    const groups =
+      req.user.role === "admin"
+        ? await db.getGroups()
+        : await db.getGroupsForAgent(req.user.agentId);
     const groupMap = {};
     groups.forEach((g) => (groupMap[g.code] = g));
 
-    // Enrich with group status
     const result = groups.map((g) => {
       const todaySession = sessions.find((s) => s.group_code === g.code);
       return {
         group_code: g.code,
         times: g.times,
+        agent_ids: g.agent_ids || [],
         status: todaySession ? todaySession.status : "idle",
         session_id: todaySession ? todaySession.id : null,
         slot: todaySession ? todaySession.slot : null,
@@ -452,10 +538,16 @@ app.get("/api/dashboard/sessions", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/dashboard/sessions/:id", requireAuth, async (req, res) => {
+app.get("/api/dashboard/sessions/:id", resolveUser, async (req, res) => {
   try {
     const session = await db.getSessionById(req.params.id);
     if (!session) return res.status(404).json({ error: "Session not found" });
+    if (
+      req.user.role === "agent" &&
+      !(await db.agentCanAccessGroup(req.user.agentId, session.group_code))
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     const messages = await db.getMessages(session.id);
     res.json({ ...session, messages });
   } catch (err) {
@@ -463,20 +555,29 @@ app.get("/api/dashboard/sessions/:id", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/dashboard/stats", requireAuth, async (req, res) => {
+app.get("/api/dashboard/stats", resolveUser, async (req, res) => {
   try {
-    const stats = await db.getDashboardStats(today());
+    const stats =
+      req.user.role === "admin"
+        ? await db.getDashboardStats(today())
+        : await db.getDashboardStatsForAgent(req.user.agentId, today());
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/api/download/:sessionId", requireAuth, async (req, res) => {
+app.get("/api/download/:sessionId", resolveUser, async (req, res) => {
   try {
     const session = await db.getSessionById(req.params.sessionId);
     if (!session || !session.excel_path || !fs.existsSync(session.excel_path)) {
       return res.status(404).json({ error: "File not found" });
+    }
+    if (
+      req.user.role === "agent" &&
+      !(await db.agentCanAccessGroup(req.user.agentId, session.group_code))
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
     }
     res.download(session.excel_path);
   } catch (err) {
@@ -485,10 +586,16 @@ app.get("/api/download/:sessionId", requireAuth, async (req, res) => {
 });
 
 // ---------------- REPORT: GROUP SESSIONS ----------------
-app.get("/api/report/group/:code", requireAuth, async (req, res) => {
+app.get("/api/report/group/:code", resolveUser, async (req, res) => {
   try {
     const group = await db.getGroup(req.params.code);
     if (!group) return res.status(404).json({ error: "Group not found" });
+    if (
+      req.user.role === "agent" &&
+      !(await db.agentCanAccessGroup(req.user.agentId, req.params.code))
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const sessions = await db.getSessionsByGroup(req.params.code);
 
@@ -524,11 +631,14 @@ app.get("/api/report/group/:code", requireAuth, async (req, res) => {
 });
 
 // ---------------- REPORT: MASTER DATE REPORT ----------------
-app.get("/api/report/date/:date", requireAuth, async (req, res) => {
+app.get("/api/report/date/:date", resolveUser, async (req, res) => {
   try {
     const date = req.params.date;
     const sessions = await db.getSessionsByDate(date);
-    const groups = await db.getGroups();
+    const groups =
+      req.user.role === "admin"
+        ? await db.getGroups()
+        : await db.getGroupsForAgent(req.user.agentId);
 
     // Build a map of sessions by group
     const sessionMap = {};
@@ -586,10 +696,13 @@ app.get("/api/report/date/:date", requireAuth, async (req, res) => {
 });
 
 // ---------------- API: RAW SESSIONS (for history tab) ----------------
-app.get("/api/sessions/raw", requireAuth, async (req, res) => {
+app.get("/api/sessions/raw", resolveUser, async (req, res) => {
   try {
     const date = req.query.date || today();
-    const sessions = await db.getSessions(date);
+    const sessions =
+      req.user.role === "admin"
+        ? await db.getSessions(date)
+        : await db.getSessionsForAgent(req.user.agentId, date);
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -597,7 +710,7 @@ app.get("/api/sessions/raw", requireAuth, async (req, res) => {
 });
 
 // ---------------- API: SETTINGS ----------------
-app.post("/api/settings/reset", requireAuth, async (req, res) => {
+app.post("/api/settings/reset", resolveUser, requireAdmin, async (req, res) => {
   try {
     // Delete all exported Excel files
     ensureExportsDir();
@@ -622,7 +735,7 @@ app.post("/api/settings/reset", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/settings/password", requireAuth, async (req, res) => {
+app.post("/api/settings/password", resolveUser, requireAdmin, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const adminPassword = await db.getSetting("admin_password");
@@ -637,6 +750,82 @@ app.post("/api/settings/password", requireAuth, async (req, res) => {
 
     await db.setSetting("admin_password", newPassword);
     res.json({ success: true, token: newPassword });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------- API: AGENTS (admin) ----------------
+app.get("/api/agents", resolveUser, requireAdmin, async (req, res) => {
+  try {
+    const agents = await db.listAgents();
+    res.json(agents);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/agents", resolveUser, requireAdmin, async (req, res) => {
+  try {
+    const { phone, password } = req.body || {};
+    const digits = normalizePhoneDigits(phone);
+    if (!digits || !password || password.length < 4) {
+      return res.status(400).json({ error: "Phone and password (min 4 chars) required" });
+    }
+    const hash = bcrypt.hashSync(password, 10);
+    const row = await db.createAgent(digits, hash);
+    emitUpdate();
+    res.json({ success: true, agent: row });
+  } catch (err) {
+    if (String(err.message).includes("unique") || err.code === "23505") {
+      return res.status(400).json({ error: "Agent phone already exists" });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/agents/:id", resolveUser, requireAdmin, async (req, res) => {
+  try {
+    await db.deleteAgent(Number(req.params.id));
+    emitUpdate();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/agents/:id/reset-password", resolveUser, requireAdmin, async (req, res) => {
+  try {
+    const { newPassword } = req.body || {};
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: "New password must be at least 4 characters" });
+    }
+    const id = Number(req.params.id);
+    const agent = await db.getAgentById(id);
+    if (!agent) return res.status(404).json({ error: "Agent not found" });
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await db.updateAgentPassword(id, hash);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/agent/change-password", resolveUser, requireAgent, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const full = await db.getAgentWithHash(req.user.agentId);
+    if (!bcrypt.compareSync(currentPassword, full.password_hash)) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await db.updateAgentPassword(req.user.agentId, hash);
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    await db.setAgentSessionToken(req.user.agentId, sessionToken);
+    res.json({ success: true, token: sessionToken });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

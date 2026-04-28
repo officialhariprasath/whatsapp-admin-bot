@@ -30,6 +30,14 @@ body {
   min-height: 100vh;
 }
 
+.sidebar-overlay {
+  display: none;
+}
+
+.mobile-menu-btn {
+  display: none;
+}
+
 /* Sidebar */
 .sidebar {
   width: 260px;
@@ -105,6 +113,12 @@ body {
 }
 
 .topbar h2 { font-size: 1.5rem; font-weight: 700; }
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 
 .topbar-actions {
   display: flex;
@@ -344,7 +358,10 @@ body {
 }
 
 .form-group input[type="text"],
-.form-group input[type="date"] {
+.form-group input[type="date"],
+.form-group input[type="password"],
+.form-group input[type="tel"],
+.form-group select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -471,8 +488,65 @@ body {
 }
 
 @media (max-width: 768px) {
-  .sidebar { width: 100%; position: relative; height: auto; }
   .main { margin-left: 0; max-width: 100%; padding: 16px; }
-  .app { flex-direction: column; }
-  .stats-grid { grid-template-columns: 1fr; }
+  .mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    height: 100vh;
+    z-index: 220;
+  }
+
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 210;
+  }
+
+  body.mobile-sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+  body.mobile-sidebar-open .sidebar-overlay {
+    display: block;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(220px, 1fr);
+    overflow-x: auto;
+    gap: 12px;
+    padding-bottom: 8px;
+    margin-bottom: 18px;
+  }
+  .stat-card {
+    min-width: 220px;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 120;
+    background: rgba(15, 23, 42, 0.94);
+    backdrop-filter: blur(6px);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+  }
 }

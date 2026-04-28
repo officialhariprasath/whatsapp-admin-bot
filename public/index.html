@@ -12,18 +12,19 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
-  <div class="app">
+  <div class="sidebar-overlay" onclick="closeSidebar()"></div>
+  <div class="app" id="appRoot">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="brand">
         <i class="fa-brands fa-whatsapp"></i>
         <span>WA Admin Bot</span>
       </div>
       <nav>
-        <a href="#" class="active" onclick="switchTab('dashboard', this)"><i class="fa-solid fa-gauge"></i> Dashboard</a>
-        <a href="#" onclick="switchTab('groups', this)"><i class="fa-solid fa-users"></i> Groups</a>
-        <a href="#" onclick="switchTab('sessions', this)"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
-        <a href="#" onclick="switchTab('settings', this)"><i class="fa-solid fa-gear"></i> Settings</a>
+        <a href="#" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        <a href="#" class="js-admin-only" onclick="switchTab('groups', this); closeSidebar();"><i class="fa-solid fa-users"></i> Groups</a>
+        <a href="#" onclick="switchTab('sessions', this); closeSidebar();"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
+        <a href="#" onclick="switchTab('settings', this); closeSidebar();"><i class="fa-solid fa-gear"></i> Settings</a>
       </nav>
       <div class="sidebar-footer">
         <button class="btn btn-danger btn-sm" style="width:100%;margin:0;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Logout</button>
@@ -35,7 +36,12 @@
     <main class="main">
       <!-- Top Bar -->
       <header class="topbar">
-        <h2 id="pageTitle">Dashboard</h2>
+        <div class="topbar-left">
+          <button type="button" class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Open menu">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <h2 id="pageTitle">Dashboard</h2>
+        </div>
         <div class="topbar-actions">
           <button type="button" class="btn btn-secondary btn-sm" onclick="refreshApp()" title="Reload app">
             <i class="fa-solid fa-arrows-rotate"></i> Refresh
@@ -79,7 +85,7 @@
         </div>
 
         <!-- Groups Table -->
-        <div class="card">
+        <div class="card js-admin-only">
           <div class="card-header">
             <h3><i class="fa-solid fa-list"></i> Group Status Overview</h3>
             <div class="search-box">
@@ -109,7 +115,7 @@
       </section>
 
       <!-- Groups Tab -->
-      <section id="tab-groups" class="tab">
+      <section id="tab-groups" class="tab js-admin-only">
         <div class="card">
           <div class="card-header">
             <h3><i class="fa-solid fa-plus-circle"></i> Add New Group</h3>
@@ -128,6 +134,10 @@
                 <label class="checkbox-label"><input type="checkbox" value="8PM"> 8PM</label>
               </div>
             </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label>Assign agents (optional)</label>
+              <div id="addGroupAgentCheckboxes" class="checkbox-group" style="flex-wrap:wrap;"></div>
+            </div>
             <div class="form-group form-actions">
               <button class="btn btn-primary" onclick="addGroup()"><i class="fa-solid fa-plus"></i> Add Group</button>
             </div>
@@ -144,12 +154,13 @@
                 <tr>
             <th>Code</th>
                   <th>Time Slots</th>
+                  <th>Agents</th>
                   <th>Created</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="groupsTable">
-                <tr><td colspan="4" class="empty">Loading...</td></tr>
+                <tr><td colspan="5" class="empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -192,7 +203,41 @@
 
       <!-- Settings Tab -->
       <section id="tab-settings" class="tab">
-        <div class="card">
+        <div class="card js-admin-only">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-user-shield"></i> Agents</h3>
+          </div>
+          <div style="padding: 0 24px 20px;">
+            <p style="color:var(--text-muted);margin:16px 0 12px;font-size:0.9rem;">
+              Create agents (phone + password). Assign them to groups from the Groups tab or when editing a group.
+            </p>
+            <div class="form-row" style="grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px;">
+              <div class="form-group">
+                <label>Phone (digits)</label>
+                <input type="tel" id="newAgentPhone" placeholder="919876543210">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="newAgentPassword" placeholder="Min 4 characters">
+              </div>
+              <div class="form-group">
+                <button type="button" class="btn btn-primary" onclick="createAgent()"><i class="fa-solid fa-plus"></i> Add agent</button>
+              </div>
+            </div>
+            <div class="table-responsive" style="margin-top:16px;">
+              <table class="data-table">
+                <thead>
+                  <tr><th>ID</th><th>Phone</th><th>Created</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="agentsAdminTable">
+                  <tr><td colspan="4" class="empty">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card js-admin-only">
           <div class="card-header">
             <h3><i class="fa-solid fa-shield-halved"></i> Change Admin Password</h3>
           </div>
@@ -215,6 +260,29 @@
           </div>
         </div>
 
+        <div class="card js-agent-only">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-key"></i> Change agent password</h3>
+          </div>
+          <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr auto;">
+            <div class="form-group">
+              <label>Current password</label>
+              <input type="password" id="agentCurrentPassword" placeholder="Current">
+            </div>
+            <div class="form-group">
+              <label>New password</label>
+              <input type="password" id="agentNewPassword" placeholder="New">
+            </div>
+            <div class="form-group">
+              <label>Confirm</label>
+              <input type="password" id="agentConfirmPassword" placeholder="Confirm">
+            </div>
+            <div class="form-group form-actions">
+              <button type="button" class="btn btn-primary" onclick="changeAgentPassword()"><i class="fa-solid fa-key"></i> Update</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <h3><i class="fa-solid fa-mobile-screen-button"></i> Install App</h3>
@@ -232,7 +300,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card js-admin-only">
           <div class="card-header">
             <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--danger)"></i> Factory Reset</h3>
           </div>
@@ -268,6 +336,10 @@
             <label class="checkbox-label"><input type="checkbox" value="6PM"> 6PM</label>
             <label class="checkbox-label"><input type="checkbox" value="8PM"> 8PM</label>
           </div>
+        </div>
+        <div class="form-group">
+          <label>Assign agents (optional)</label>
+          <div id="editGroupAgentCheckboxes" class="checkbox-group" style="flex-wrap:wrap;"></div>
         </div>
       </div>
       <div class="modal-footer">

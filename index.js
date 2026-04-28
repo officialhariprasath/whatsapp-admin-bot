@@ -510,7 +510,10 @@ app.delete("/api/groups/:code", resolveUser, requireAdmin, async (req, res) => {
 app.get("/api/dashboard/sessions", resolveUser, async (req, res) => {
   try {
     const date = req.query.date || today();
-    const sessions = await db.getSessions(date);
+    const sessions =
+      req.user.role === "admin"
+        ? await db.getSessions(date)
+        : await db.getSessionsForAgent(req.user.agentId, date);
 
     const groups =
       req.user.role === "admin"

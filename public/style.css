@@ -343,6 +343,10 @@ body {
   align-items: end;
 }
 
+.password-form-row {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -501,6 +505,7 @@ body {
 /* Responsive */
 @media (max-width: 1024px) {
   .form-row { grid-template-columns: 1fr; }
+  .password-form-row { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 

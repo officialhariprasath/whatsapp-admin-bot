@@ -8,7 +8,7 @@ let deferredInstallPrompt = null;
 let pwaUpdatePending = false;
 let pwaUpdateDismissed = false;
 let lastUserActivityAt = Date.now();
-const userRole = localStorage.getItem("userRole") || "admin";
+let userRole = localStorage.getItem("userRole") || "";
 
 function getAuthHeaders() {
   return {
@@ -151,6 +151,7 @@ socket.on("dashboard-update", () => {
 
 document.addEventListener("DOMContentLoaded", async () => {
   checkAuth();
+  await syncUserRole();
   applyRoleUI();
   setupInstallPrompt();
   setupPwaUpdateUX();
@@ -160,6 +161,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (userRole === "admin") await loadGroupsPage();
   await loadAllSessions();
 });
+
+async function syncUserRole() {
+  try {
+    const res = await fetch("/api/me", { headers: getAuthHeaders() });
+    if (res.status === 401) {
+      logout();
+      return;
+    }
+    const data = await res.json();
+    userRole = data?.role || localStorage.getItem("userRole") || "";
+    if (userRole) localStorage.setItem("userRole", userRole);
+  } catch {
+    userRole = localStorage.getItem("userRole") || "";
+  }
+}
 
 function setupPwaUpdateUX() {
   ["click", "keydown", "touchstart", "mousemove", "scroll"].forEach((ev) => {
@@ -579,3 +595,4 @@ async function doReset() {
 document.getElementById("editModal").addEventListener("click", (e) => {
   if (e.target.id === "editModal") closeModal();
 });
+

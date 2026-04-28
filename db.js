@@ -206,7 +206,7 @@ async function getGroupsForAgent(agentId) {
   return rows.map((r) => ({ ...r, times: parseTimes(r), agent_ids: parseAgentIds(r) }));
 }
 
-/** Groups visible on WhatsApp: unassigned groups OR groups linked to this phone's agent record. */
+/** Groups visible on WhatsApp for an agent phone: only assigned groups. */
 async function getGroupsForWhatsappPhone(phoneDigits) {
   const { rows } = await pool.query(
     `
@@ -217,13 +217,9 @@ async function getGroupsForWhatsappPhone(phoneDigits) {
         '[]'::json
       ) AS agent_ids
     FROM groups_table g
-    WHERE NOT EXISTS (SELECT 1 FROM group_agents ga0 WHERE ga0.group_code = g.code)
-       OR EXISTS (
-         SELECT 1 FROM group_agents ga3
-         INNER JOIN agents a ON a.id = ga3.agent_id
-         WHERE ga3.group_code = g.code
-           AND regexp_replace(a.phone, '\\D', '', 'g') = $1
-       )
+    INNER JOIN group_agents ga3 ON ga3.group_code = g.code
+    INNER JOIN agents a ON a.id = ga3.agent_id
+    WHERE regexp_replace(a.phone, '\\D', '', 'g') = $1
     ORDER BY g.created_at DESC
   `,
     [phoneDigits]
@@ -605,3 +601,4 @@ module.exports = {
   setSetting,
   resetDatabase,
 };
+

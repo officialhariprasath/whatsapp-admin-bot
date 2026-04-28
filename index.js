@@ -446,6 +446,10 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+app.get("/api/me", resolveUser, async (req, res) => {
+  res.json(req.user);
+});
+
 // ---------------- API: GROUPS (Protected) ----------------
 app.get("/api/groups", resolveUser, async (req, res) => {
   try {

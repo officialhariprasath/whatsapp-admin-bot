@@ -1,6 +1,6 @@
 # 🚀 Render Deployment Guide
 
-Deploy the full WhatsApp Admin Bot to Render with PlanetScale MySQL database.
+Deploy the full WhatsApp Admin Bot to Render with **Render PostgreSQL** (free tier — no separate database vendor required).
 
 ---
 
@@ -33,16 +33,17 @@ git push -u origin main
 
 ---
 
-## Step 3: Create PlanetScale Database (Free MySQL)
+## Step 3: Create PostgreSQL on Render (free)
 
-1. Go to [planetscale.com](https://planetscale.com) → Sign up
-2. Click **Create Database**
-3. Name: `whatsapp-admin-bot`
-4. Region: Choose closest to your users (e.g., `ap-south` for India)
+1. In [render.com](https://render.com) dashboard → **New +** → **PostgreSQL**
+2. Name: `whatsapp-admin-bot-db` (or any name)
+3. Region: **Same region** you will use for the web service (important for low latency and internal URL)
+4. Plan: **Free**
 5. Click **Create Database**
-6. Go to **Connect** → Select **Connect with: `@planetscale/database` or general MySQL**
-7. Copy the **Database URL** (looks like: `mysql://username:password@host.region.psdb.cloud/dbname?sslaccept=strict`)
-8. Save this URL — you'll paste it into Render
+6. After it provisions, open the database → **Connections**
+7. Copy the **Internal Database URL** (starts with `postgresql://`). Use internal URL if your web service runs on Render in the same region; otherwise use the external URL.
+
+Keep this URL — you will add it as `DATABASE_URL` on the web service (Step 4).
 
 ---
 
@@ -66,12 +67,14 @@ git push -u origin main
 
 | Key | Value |
 |-----|-------|
-| `DATABASE_URL` | *(Paste your PlanetScale URL here)* |
+| `DATABASE_URL` | *(Paste your Render PostgreSQL **Internal** or **External** URL)* |
 | `VERIFY_TOKEN` | `myverifytoken123` |
 | `WHATSAPP_TOKEN` | *(Your fresh Meta permanent token)* |
 | `PHONE_NUMBER_ID` | `998823059991140` |
 | `ADMIN_PASSWORD` | `admin123` *(or your choice)* |
 | `PORT` | `10000` |
+
+**Important:** `DATABASE_URL` must be set on the **Web Service** (this app), not only on the PostgreSQL resource. In Render: **PostgreSQL** → **Connections** → copy **Internal Database URL** → **Web Service** → **Environment** → add `DATABASE_URL` with that value. Your repo’s `.env` is **not** used on Render unless you configure it.
 
 6. Click **Create Web Service**
 
@@ -105,6 +108,42 @@ https://whatsapp-admin-bot.onrender.com/login.html
 
 ---
 
+## Step 7: Meta — Deploy for Review & Switch to Live Mode
+
+Do this **after** your Render URL works and the webhook verifies (Step 5).
+
+### A. Finish hosting checklist (you)
+
+1. **Stable URL** — Use your real Render URL (`https://YOUR-SERVICE.onrender.com`). Webhooks must be **HTTPS**.
+2. **Env vars match Meta** — `VERIFY_TOKEN` = webhook verify token in Meta. `WHATSAPP_TOKEN` = token from **WhatsApp → API Setup**. `PHONE_NUMBER_ID` = ID for the **same** WhatsApp Business number you use in production (copy from API Setup if you change numbers).
+3. **Subscribe to webhooks** — WhatsApp → **Configuration** → Webhook fields include **`messages`** (and any others your app needs).
+
+### B. Business & WhatsApp assets (Meta)
+
+1. **Meta Business Suite / Business Manager** — Your business should own the WhatsApp Business Account (WABA) and phone number.
+2. **Business verification** — If Meta asks for it (common for production messaging), complete **Business verification** in Business Manager before or during review.
+3. **WhatsApp Business Account** — In **WhatsApp Manager**, ensure the phone number, display name, and quality status are acceptable for how you’ll use the app.
+
+### C. App Review (submit the app)
+
+1. In [developers.facebook.com](https://developers.facebook.com) open your app → **App Review** → **Requests** (or **Permissions and Features**).
+2. Request what your integration needs. For Cloud API messaging this often includes WhatsApp-related permissions (e.g. messaging / management — exact names depend on Meta’s current list).
+3. Fill in **use case**, **screencast** or **instructions** showing: user opt-in, how messages are handled, and your **privacy policy** URL if required.
+4. Submit and respond to Meta’s questions until the submission is **approved**.
+
+### D. Turn the app Live
+
+1. App Dashboard → **Settings** → **Basic** — complete anything Meta marks as required (privacy policy URL, app icon, category, etc.).
+2. When review is approved and requirements are green, switch the app from **Development** to **Live** (toggle or **Go Live** — wording varies).
+3. **Regenerate or confirm your access token** if Meta asks you to use a production/system token — paste the new value into Render as `WHATSAPP_TOKEN` and redeploy if needed.
+4. Test with a **real customer number** (not only test numbers) only after the app is Live and your number is allowed for production traffic.
+
+### E. Free Render tier caveat for reviewers
+
+On the **free** plan the service **sleeps** after idle time; the **first** request can take ~30–60 seconds. For **App Review**, either wake the service before your demo or temporarily upgrade Render so the webhook responds quickly when Meta pings it.
+
+---
+
 ## ⚠️ Important Notes
 
 ### Free Tier Limitations (Render)
@@ -112,11 +151,9 @@ https://whatsapp-admin-bot.onrender.com/login.html
 - First request after spin-down takes ~30 seconds to wake up
 - For production, consider upgrading to paid plan
 
-### Free Tier Limitations (PlanetScale)
-- 5GB storage
-- 1 billion row reads/month
-- 10 million row writes/month
-- More than enough for this app
+### Free Tier Limitations (Render PostgreSQL)
+- Storage and connection limits apply per Render’s current free Postgres terms; enough for testing and moderate use.
+- Database and web service are separate resources — create Postgres **before** or **with** the app and paste `DATABASE_URL` into the web service env vars.
 
 ### WhatsApp Token Refresh
 - Permanent tokens from Meta expire after ~60 days of inactivity
@@ -147,7 +184,7 @@ Render will automatically detect the push and redeploy.
 ```
 whatsapp-admin-bot/
 ├── index.js          # Server (webhook + API + Socket.IO)
-├── db.js             # Database layer (PlanetScale MySQL)
+├── db.js             # Database layer (PostgreSQL / `pg`)
 ├── package.json      # Dependencies
 ├── public/           # Frontend (served by Express)
 │   ├── login.html    # Admin login
@@ -165,7 +202,7 @@ whatsapp-admin-bot/
 | Problem | Solution |
 |---------|----------|
 | "Application Error" on Render | Check Render logs (Dashboard → Logs) |
-| "Database connection failed" | Verify `DATABASE_URL` is correct from PlanetScale |
+| "Database connection failed" | Verify `DATABASE_URL` matches Render Postgres (internal URL if app is on Render) |
 | "Unauthorized" on login | Check `ADMIN_PASSWORD` env var |
 | Webhook verification fails | Verify `VERIFY_TOKEN` matches Meta dashboard |
 | Messages not coming in | Regenerate `WHATSAPP_TOKEN` in Meta dashboard |
@@ -177,7 +214,7 @@ whatsapp-admin-bot/
 
 Your WhatsApp Admin Bot is now live on the internet with:
 - ✅ Free hosting on Render
-- ✅ Free MySQL database on PlanetScale
+- ✅ Free PostgreSQL on Render (linked via `DATABASE_URL`)
 - ✅ Secure admin login
 - ✅ Real-time dashboard with Socket.IO
 - ✅ Automatic Excel generation and downloads

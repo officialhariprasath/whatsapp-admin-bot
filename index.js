@@ -485,8 +485,10 @@ io.on("connection", (socket) => {
       console.log(`🚀 Server running on port ${process.env.PORT}`);
     });
   } catch (err) {
-    console.error("❌ Failed to start server:", err.message);
-    console.error("Make sure MySQL is running and credentials in .env are correct.");
+    console.error("❌ Failed to start server:", err && err.stack ? err.stack : err);
+    console.error(
+      "Check DATABASE_URL on Render (Web Service → Environment), or local .env. PostgreSQL must be reachable."
+    );
     process.exit(1);
   }
 })();

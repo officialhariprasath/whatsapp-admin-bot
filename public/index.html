@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#0f172a">
   <title>WhatsApp Admin Bot Dashboard</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
@@ -208,6 +209,23 @@
             <div class="form-group form-actions">
               <button class="btn btn-primary" onclick="changePassword()"><i class="fa-solid fa-key"></i> Update</button>
             </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-mobile-screen-button"></i> Install App</h3>
+          </div>
+          <div style="padding:20px 24px;">
+            <p style="color:var(--text-muted);margin-bottom:16px;">
+              Install this dashboard on your phone or desktop for quick access.
+            </p>
+            <button id="installAppBtn" class="btn btn-success" onclick="installApp()" style="display:none;">
+              <i class="fa-solid fa-download"></i> Install App
+            </button>
+            <small id="installHint" style="display:block;margin-top:10px;color:var(--text-muted);">
+              If the button is hidden, use your browser menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+            </small>
           </div>
         </div>
 

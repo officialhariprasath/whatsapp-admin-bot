@@ -4,6 +4,7 @@ let dashboardData = [];
 let allGroupsData = [];
 let allSessionsData = [];
 let currentSearch = "";
+let deferredInstallPrompt = null;
 
 // ---------------- AUTH ----------------
 function getAuthHeaders() {
@@ -38,11 +39,49 @@ socket.on("connect", () => {
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
   checkAuth();
+  setupInstallPrompt();
   loadDashboard();
   loadGroupsPage();
   loadAllSessions();
   document.getElementById("sessionDate").value = new Date().toISOString().split("T")[0];
 });
+
+function setupInstallPrompt() {
+  const btn = document.getElementById("installAppBtn");
+  if (!btn) return;
+
+  if (!window.matchMedia("(display-mode: standalone)").matches) {
+    btn.style.display = "none";
+  }
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    btn.style.display = "inline-flex";
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    btn.style.display = "none";
+    showToast("App installed successfully!");
+  });
+}
+
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    showToast("Install option not available. Use browser menu > Install app.", "error");
+    return;
+  }
+
+  deferredInstallPrompt.prompt();
+  const choice = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  document.getElementById("installAppBtn").style.display = "none";
+
+  if (choice.outcome !== "accepted") {
+    showToast("Install cancelled", "error");
+  }
+}
 
 // ---------------- TABS ----------------
 function switchTab(tabName, el) {

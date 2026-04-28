@@ -48,39 +48,64 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function setupInstallPrompt() {
   const btn = document.getElementById("installAppBtn");
+  const hint = document.getElementById("installHint");
   if (!btn) return;
 
-  if (!window.matchMedia("(display-mode: standalone)").matches) {
-    btn.style.display = "none";
+  const standalone = window.matchMedia("(display-mode: standalone)").matches;
+  if (standalone) {
+    btn.disabled = true;
+    btn.classList.add("btn-secondary");
+    btn.classList.remove("btn-success");
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Installed';
+    if (hint) {
+      hint.textContent = "You are already running the installed app.";
+    }
+    return;
   }
 
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredInstallPrompt = e;
-    btn.style.display = "inline-flex";
+    if (hint) {
+      hint.textContent = "Install is available—tap Install App, or use your browser menu.";
+    }
   });
 
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
-    btn.style.display = "none";
     showToast("App installed successfully!");
+    btn.disabled = true;
+    btn.classList.add("btn-secondary");
+    btn.classList.remove("btn-success");
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Installed';
+    if (hint) hint.textContent = "Installation complete.";
   });
 }
 
 async function installApp() {
-  if (!deferredInstallPrompt) {
-    showToast("Install option not available. Use browser menu > Install app.", "error");
+  if (window.matchMedia("(display-mode: standalone)").matches) {
+    showToast("Already running as installed app.", "error");
     return;
   }
 
-  deferredInstallPrompt.prompt();
-  const choice = await deferredInstallPrompt.userChoice;
-  deferredInstallPrompt = null;
-  document.getElementById("installAppBtn").style.display = "none";
-
-  if (choice.outcome !== "accepted") {
-    showToast("Install cancelled", "error");
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (choice.outcome !== "accepted") {
+      showToast("Install cancelled", "error");
+    }
+    return;
   }
+
+  showToast(
+    "No install prompt from browser. Use menu: Chrome/Edge → Install app, or iOS Safari → Share → Add to Home Screen.",
+    "error"
+  );
+}
+
+function refreshApp() {
+  window.location.reload();
 }
 
 // ---------------- TABS ----------------

@@ -37,6 +37,9 @@
       <header class="topbar">
         <h2 id="pageTitle">Dashboard</h2>
         <div class="topbar-actions">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="refreshApp()" title="Reload app">
+            <i class="fa-solid fa-arrows-rotate"></i> Refresh
+          </button>
           <span class="live-indicator"><span class="dot"></span> Live</span>
         </div>
       </header>
@@ -220,11 +223,11 @@
             <p style="color:var(--text-muted);margin-bottom:16px;">
               Install this dashboard on your phone or desktop for quick access.
             </p>
-            <button id="installAppBtn" class="btn btn-success" onclick="installApp()" style="display:none;">
+            <button id="installAppBtn" type="button" class="btn btn-success" onclick="installApp()">
               <i class="fa-solid fa-download"></i> Install App
             </button>
             <small id="installHint" style="display:block;margin-top:10px;color:var(--text-muted);">
-              If the button is hidden, use your browser menu and choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+              On iPhone/iPad, Safari usually does not show an install prompt—use <strong>Share → Add to Home Screen</strong>. On Chrome/Edge desktop, use the menu <strong>Install app</strong> when available.
             </small>
           </div>
         </div>

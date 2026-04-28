@@ -7,6 +7,8 @@ const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
 const FormData = require("form-data");
+const JSZip = require("jszip");
+const { XMLParser, XMLBuilder } = require("fast-xml-parser");
 require("dotenv").config();
 
 const db = require("./db");
@@ -32,6 +34,8 @@ function emitUpdate() {
 const EXPORTS_DIR = path.join(__dirname, "exports");
 const SESSION_TEMPLATE_PATH = path.join(__dirname, "template_excel", "lottery_output.xlsm");
 const XLSM_MIME = "application/vnd.ms-excel.sheet.macroEnabled.12";
+const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 function ensureExportsDir() {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
@@ -86,43 +90,103 @@ async function sendWhatsAppDocumentMessage(to, mediaId, fileName, caption) {
   );
 }
 
-function buildSessionWorkbookFromTemplate(messages) {
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function colFromRef(cellRef = "") {
+  return (cellRef.match(/^[A-Z]+/) || [""])[0];
+}
+
+function rowFromRef(cellRef = "") {
+  return Number((cellRef.match(/\d+$/) || ["0"])[0]);
+}
+
+async function buildSessionWorkbookFromTemplate(messages, outputPath) {
   if (!fs.existsSync(SESSION_TEMPLATE_PATH)) {
     throw new Error(`Session template not found: ${SESSION_TEMPLATE_PATH}`);
   }
 
-  const wb = XLSX.readFile(SESSION_TEMPLATE_PATH, {
-    bookVBA: true,
-    cellFormula: true,
-    cellStyles: true,
-    cellDates: true,
+  const zip = await JSZip.loadAsync(fs.readFileSync(SESSION_TEMPLATE_PATH));
+  const workbookXml = await zip.file("xl/workbook.xml").async("string");
+  const relsXml = await zip.file("xl/_rels/workbook.xml.rels").async("string");
+
+  const workbook = xmlParser.parse(workbookXml);
+  const rels = xmlParser.parse(relsXml);
+
+  const sheets = asArray(workbook.workbook?.sheets?.sheet);
+  const targetSheet = sheets.find((s) => s["@_name"] === "Raw_Output");
+  if (!targetSheet) throw new Error("Template sheet 'Raw_Output' not found");
+
+  const targetRelId = targetSheet["@_r:id"];
+  const relationships = asArray(rels.Relationships?.Relationship);
+  const targetRel = relationships.find((r) => r["@_Id"] === targetRelId);
+  if (!targetRel) throw new Error("Raw_Output relationship not found in workbook.xml.rels");
+
+  const sheetPath = path.posix.join("xl", targetRel["@_Target"].replace(/^\/+/, ""));
+  const sheetXml = await zip.file(sheetPath).async("string");
+  const wsObj = xmlParser.parse(sheetXml);
+  const worksheet = wsObj.worksheet;
+  if (!worksheet?.sheetData) throw new Error("Raw_Output sheetData missing in template");
+
+  const rows = asArray(worksheet.sheetData.row);
+  const rowMap = new Map(rows.map((r) => [Number(r["@_r"] || 0), r]));
+
+  // Clear previous generated values only in A/B columns from row 2 onwards.
+  rows.forEach((row) => {
+    const rowNum = Number(row["@_r"] || 0);
+    if (rowNum < 2 || !row.c) return;
+    const cells = asArray(row.c).filter((c) => {
+      const col = colFromRef(c["@_r"]);
+      return !(col === "A" || col === "B");
+    });
+    if (cells.length === 0) delete row.c;
+    else row.c = cells;
   });
-
-  const ws = wb.Sheets.Raw_Output;
-  if (!ws) {
-    throw new Error("Template sheet 'Raw_Output' not found");
-  }
-
-  let range = ws["!ref"]
-    ? XLSX.utils.decode_range(ws["!ref"])
-    : { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } };
-
-  // Keep headers/formulas/macros intact; only replace input rows under SI.NO/Input columns.
-  for (let r = 1; r <= range.e.r; r++) {
-    delete ws[XLSX.utils.encode_cell({ r, c: 0 })];
-    delete ws[XLSX.utils.encode_cell({ r, c: 1 })];
-  }
 
   messages.forEach((m, i) => {
-    ws[XLSX.utils.encode_cell({ r: i + 1, c: 0 })] = { t: "n", v: i + 1 };
-    ws[XLSX.utils.encode_cell({ r: i + 1, c: 1 })] = { t: "s", v: m.content || "" };
+    const rowNum = i + 2;
+    let row = rowMap.get(rowNum);
+    if (!row) {
+      row = { "@_r": String(rowNum), c: [] };
+      rows.push(row);
+      rowMap.set(rowNum, row);
+    }
+
+    const existingCells = asArray(row.c).filter(Boolean);
+    const otherCells = existingCells.filter((c) => {
+      const col = colFromRef(c["@_r"]);
+      return !(col === "A" || col === "B");
+    });
+
+    const aCell = { "@_r": `A${rowNum}`, v: i + 1 };
+    const bCell = {
+      "@_r": `B${rowNum}`,
+      "@_t": "inlineStr",
+      is: { t: m.content || "" },
+    };
+
+    row.c = [aCell, bCell, ...otherCells];
   });
 
-  range.e.r = Math.max(range.e.r, messages.length);
-  range.e.c = Math.max(range.e.c, 1);
-  ws["!ref"] = XLSX.utils.encode_range(range);
+  rows.sort((a, b) => Number(a["@_r"] || 0) - Number(b["@_r"] || 0));
+  worksheet.sheetData.row = rows;
 
-  return wb;
+  const currentRef = worksheet.dimension?.["@_ref"] || "A1:B1";
+  const currentMaxRef = currentRef.includes(":") ? currentRef.split(":")[1] : currentRef;
+  const maxCol = colFromRef(currentMaxRef) || "B";
+  const maxRow = Math.max(rowFromRef(currentMaxRef), messages.length + 1);
+  worksheet.dimension = { ...(worksheet.dimension || {}), "@_ref": `A1:${maxCol}${maxRow}` };
+
+  let updatedSheetXml = xmlBuilder.build(wsObj);
+  if (!updatedSheetXml.startsWith("<?xml")) {
+    updatedSheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${updatedSheetXml}`;
+  }
+
+  zip.file(sheetPath, updatedSheetXml);
+  const outBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  fs.writeFileSync(outputPath, outBuffer);
 }
 
 // ---------------- AUTH MIDDLEWARE ----------------
@@ -269,12 +333,10 @@ async function finishSession(from) {
   }
 
   const messages = await db.getMessages(session.id);
-  const wb = buildSessionWorkbookFromTemplate(messages);
-
   const fileName = `${session.id}_${session.group_code}_${today()}_${session.slot}.xlsm`;
   ensureExportsDir();
   const filePath = path.join(EXPORTS_DIR, fileName);
-  XLSX.writeFile(wb, filePath, { bookType: "xlsm", bookVBA: true });
+  await buildSessionWorkbookFromTemplate(messages, filePath);
 
   await db.endSession(session.id, filePath);
   emitUpdate();

@@ -6,6 +6,7 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
+const FormData = require("form-data");
 require("dotenv").config();
 
 const db = require("./db");
@@ -100,6 +101,7 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
   } catch (err) {
     console.error("Webhook error:", err.response?.data || err.message);
+    console.error("Webhook stack:", err.stack);
     res.sendStatus(500);
   }
 });
@@ -174,17 +176,30 @@ async function finishSession(from) {
   const data = messages.map((m, i) => ({ SNo: i + 1, Message: m.content }));
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
+  const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ SNo: "-", Message: "(no messages)" }]);
   XLSX.utils.book_append_sheet(wb, ws, "Messages");
 
   const fileName = `${session.id}_${session.group_code}_${today()}_${session.slot}.xlsx`;
-  const filePath = path.join(__dirname, "exports", fileName);
+  ensureExportsDir();
+  const filePath = path.join(EXPORTS_DIR, fileName);
   XLSX.writeFile(wb, filePath);
 
   await db.endSession(session.id, filePath);
   emitUpdate();
 
-  await sendText(from, `✅ File created: ${fileName}\nMessages: ${data.length}`);
+  const caption = `✅ ${data.length} message(s)`;
+  try {
+    const mediaId = await uploadWhatsAppMediaForDocument(filePath, fileName);
+    await sendWhatsAppDocumentMessage(from, mediaId, fileName, caption);
+  } catch (err) {
+    console.error("finishSession document send:", err.response?.data || err.message || err);
+    await sendText(
+      from,
+      `✅ Excel saved: ${fileName}\nMessages: ${data.length}\n` +
+        `Download: open your web dashboard → Sessions tab → Excel button.\n` +
+        `(If you expected the file here, check server logs — Meta media upload may need permissions.)`
+    );
+  }
 }
 
 // ---------------- AUTH: LOGIN ----------------
@@ -344,7 +359,8 @@ app.get("/api/report/group/:code", requireAuth, async (req, res) => {
     XLSX.utils.book_append_sheet(wb, ws, "Group Report");
 
     const fileName = `report_group_${group.code}_${today()}.xlsx`;
-    const filePath = path.join(__dirname, "exports", fileName);
+    ensureExportsDir();
+    const filePath = path.join(EXPORTS_DIR, fileName);
     XLSX.writeFile(wb, filePath);
 
     res.download(filePath, fileName);
@@ -405,7 +421,8 @@ app.get("/api/report/date/:date", requireAuth, async (req, res) => {
     XLSX.utils.book_append_sheet(wb, ws, "Master Report");
 
     const fileName = `report_master_${date}.xlsx`;
-    const filePath = path.join(__dirname, "exports", fileName);
+    ensureExportsDir();
+    const filePath = path.join(EXPORTS_DIR, fileName);
     XLSX.writeFile(wb, filePath);
 
     res.download(filePath, fileName);
@@ -429,8 +446,9 @@ app.get("/api/sessions/raw", requireAuth, async (req, res) => {
 app.post("/api/settings/reset", requireAuth, async (req, res) => {
   try {
     // Delete all exported Excel files
-    const exportsDir = path.join(__dirname, "exports");
-    const files = fs.readdirSync(exportsDir);
+    ensureExportsDir();
+    const exportsDir = EXPORTS_DIR;
+    const files = fs.existsSync(exportsDir) ? fs.readdirSync(exportsDir) : [];
     for (const file of files) {
       if (file.endsWith(".xlsx")) {
         fs.unlinkSync(path.join(exportsDir, file));
@@ -481,6 +499,7 @@ io.on("connection", (socket) => {
   try {
     await db.init();
     await db.initTables();
+    ensureExportsDir();
     httpServer.listen(process.env.PORT, () => {
       console.log(`🚀 Server running on port ${process.env.PORT}`);
     });

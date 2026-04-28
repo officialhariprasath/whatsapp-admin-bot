@@ -155,6 +155,10 @@ On the **free** plan the service **sleeps** after idle time; the **first** reque
 - Storage and connection limits apply per Render’s current free Postgres terms; enough for testing and moderate use.
 - Database and web service are separate resources — create Postgres **before** or **with** the app and paste `DATABASE_URL` into the web service env vars.
 
+### Excel files (`/end` + dashboard download)
+- After **`/end`**, the server builds a `.xlsx` under `exports/` and uploads it to WhatsApp so the admin gets the **Excel file in the chat**. If Meta rejects the upload, you still get a **text** with the filename — use **Dashboard → Sessions → Excel** to download (`/api/download/...`).
+- **Render free tier** uses **ephemeral disk**: after a redeploy or if the dyno cycles, files in `exports/` can disappear while the DB still lists old paths → download may say **404 File not found**. Regenerate by workflow or rely on WhatsApp-delivered copies. For persistent files, upgrade Render or attach object storage later.
+
 ### WhatsApp Token Refresh
 - Permanent tokens from Meta expire after ~60 days of inactivity
 - If messages stop coming through, regenerate the token and update the `WHATSAPP_TOKEN` in Render dashboard

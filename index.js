@@ -29,6 +29,62 @@ function emitUpdate() {
   io.emit("dashboard-update");
 }
 
+const EXPORTS_DIR = path.join(__dirname, "exports");
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+function ensureExportsDir() {
+  fs.mkdirSync(EXPORTS_DIR, { recursive: true });
+}
+
+async function uploadWhatsAppMediaForDocument(filePath, fileName) {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("file", fs.createReadStream(filePath), {
+    filename: fileName,
+    contentType: XLSX_MIME,
+  });
+  form.append("type", XLSX_MIME);
+
+  const { data } = await axios.post(
+    `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/media`,
+    form,
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        ...form.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    }
+  );
+  if (!data.id) {
+    throw new Error(`WhatsApp media upload: ${JSON.stringify(data)}`);
+  }
+  return data.id;
+}
+
+async function sendWhatsAppDocumentMessage(to, mediaId, fileName, caption) {
+  await axios.post(
+    `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to,
+      type: "document",
+      document: {
+        id: mediaId,
+        filename: fileName,
+        ...(caption ? { caption } : {}),
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+}
+
 // ---------------- AUTH MIDDLEWARE ----------------
 async function requireAuth(req, res, next) {
   const token = req.headers["x-auth-token"] || req.query.token;

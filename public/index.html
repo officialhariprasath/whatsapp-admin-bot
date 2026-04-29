@@ -21,7 +21,7 @@
         <span>KL Bot</span>
       </div>
       <nav>
-        <a href="#" id="navDashboard" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        <a href="#" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
         <a href="#" class="js-agent-only" onclick="switchTab('mygroups', this); closeSidebar();"><i class="fa-solid fa-circle-check"></i> My Groups</a>
         <a href="#" class="js-admin-only" onclick="switchTab('groups', this); closeSidebar();"><i class="fa-solid fa-users"></i> Groups</a>
         <a href="#" onclick="switchTab('sessions', this); closeSidebar();"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
@@ -101,6 +101,7 @@
               <input type="text" id="searchInput" placeholder="Search groups..." oninput="filterGroups()">
             </div>
           </div>
+          <p class="dashboard-groups-hint">Tap a group code or the clock button to see each time slot (cards work well on mobile).</p>
           <div class="table-responsive">
             <table class="data-table">
               <thead>
@@ -122,30 +123,6 @@
         </div>
       </section>
 
-      <!-- Group detail: one card per time slot (admin + agents) -->
-      <section id="tab-group-slots" class="tab">
-        <div class="group-slots-toolbar card" style="margin-bottom:16px;padding:16px 20px;">
-          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="backFromGroupSlotsView()">
-              <i class="fa-solid fa-arrow-left"></i> Back to dashboard
-            </button>
-            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
-              <label style="color:var(--text-muted);font-size:0.9rem;">Date</label>
-              <input type="date" id="groupSlotsDate" style="max-width:160px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);" onchange="loadGroupSlotsDetail()">
-              <button type="button" class="btn btn-primary btn-sm" onclick="loadGroupSlotsDetail()"><i class="fa-solid fa-rotate"></i> Load</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="groupSlotsDownloadReport()" title="Group report (PDF/Excel as configured)">
-                <i class="fa-solid fa-chart-bar"></i> Group report
-              </button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openGroupSlotsInNewTab()" title="Open this view in a new browser tab">
-                <i class="fa-solid fa-up-right-from-square"></i> New tab
-              </button>
-            </div>
-          </div>
-          <p id="groupSlotsSubtitle" style="margin:12px 0 0;color:var(--text-muted);font-size:0.9rem;"></p>
-        </div>
-        <div id="groupSlotCards" class="slot-cards-grid" aria-live="polite"></div>
-      </section>
-
       <!-- Agent: approved / assigned groups (read-only) -->
       <section id="tab-mygroups" class="tab js-agent-only">
         <div class="card">
@@ -162,11 +139,10 @@
                   <th>Group code</th>
                   <th>Time slots</th>
                   <th>Assigned</th>
-                  <th>By slot</th>
                 </tr>
               </thead>
               <tbody id="myGroupsTable">
-                <tr><td colspan="4" class="empty">Loading...</td></tr>
+                <tr><td colspan="3" class="empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -405,6 +381,25 @@
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="saveEditGroup()">Save Changes</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Group × timing cards (dashboard drill-down; mobile-friendly) -->
+  <div id="groupSlotOverlay" class="group-slot-overlay" aria-hidden="true">
+    <div class="group-slot-panel" role="dialog" aria-labelledby="groupSlotTitle">
+      <div class="group-slot-toolbar">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="closeGroupSlotDetail()">
+          <i class="fa-solid fa-arrow-left"></i> Back
+        </button>
+        <div class="group-slot-toolbar-meta">
+          <h3 id="groupSlotTitle">Group</h3>
+          <label class="group-slot-date-label">
+            <span>Date</span>
+            <input type="date" id="groupSlotDate" onchange="reloadGroupSlotDetail()">
+          </label>
+        </div>
+      </div>
+      <div id="groupSlotCards" class="slot-card-grid"></div>
     </div>
   </div>
 

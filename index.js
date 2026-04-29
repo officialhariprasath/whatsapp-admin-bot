@@ -545,32 +545,54 @@ app.get("/api/dashboard/sessions", resolveUser, async (req, res) => {
   }
 });
 
-/** Per–time-slot status for one group on a date (admin + assigned agents). */
-app.get("/api/dashboard/group/:code/slots", resolveUser, async (req, res) => {
+/** Per-group view: each configured time slot + session on a given date (admin + assigned agents). */
+app.get("/api/dashboard/groups/:code/slot-detail", resolveUser, async (req, res) => {
   try {
     const code = String(req.params.code || "")
       .trim()
       .toUpperCase();
+    if (!code) return res.status(400).json({ error: "Invalid group code" });
     const date = req.query.date || today();
     const group = await db.getGroup(code);
-    if (!group) {
-      return res.status(404).json({ error: "Group not found" });
+    if (!group) return res.status(404).json({ error: "Group not found" });
+    if (
+      req.user.role === "agent" &&
+      !(await db.agentCanAccessGroup(req.user.agentId, code))
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
     }
-    if (req.user.role === "agent") {
-      const ok = await db.agentCanAccessGroup(req.user.agentId, code);
-      if (!ok) return res.status(403).json({ error: "Forbidden" });
-    }
-    const times = Array.isArray(group.times) ? group.times : [];
-    const sessions = await db.getSessionsForGroupOnDate(code, date);
+    const sessions = await db.getSessionsForGroupAndDate(code, date);
     const bySlot = {};
     for (const s of sessions) {
-      bySlot[s.slot] = s;
+      const prev = bySlot[s.slot];
+      if (!prev || new Date(s.created_at) > new Date(prev.created_at)) {
+        bySlot[s.slot] = s;
+      }
     }
-    const slots = times.map((label) => ({
-      label,
-      session: bySlot[label] || null,
-    }));
-    res.json({ code: group.code, times, date, slots });
+    const times = Array.isArray(group.times) ? group.times : [];
+    const slots = times.map((slot) => {
+      const session = bySlot[slot] || null;
+      return {
+        slot,
+        session: session
+          ? {
+              id: session.id,
+              status: session.status,
+              message_count: session.message_count,
+              owner_phone: session.owner_phone,
+              created_at: session.created_at,
+              ended_at: session.ended_at,
+              has_excel: Boolean(session.excel_path),
+            }
+          : null,
+      };
+    });
+    res.json({
+      code: group.code,
+      date,
+      times,
+      slots,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

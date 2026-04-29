@@ -21,7 +21,7 @@
         <span>KL Bot</span>
       </div>
       <nav>
-        <a href="#" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        <a href="#" id="navDashboard" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
         <a href="#" class="js-agent-only" onclick="switchTab('mygroups', this); closeSidebar();"><i class="fa-solid fa-circle-check"></i> My Groups</a>
         <a href="#" class="js-admin-only" onclick="switchTab('groups', this); closeSidebar();"><i class="fa-solid fa-users"></i> Groups</a>
         <a href="#" onclick="switchTab('sessions', this); closeSidebar();"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
@@ -58,6 +58,29 @@
         </div>
       </div>
 
+      <!-- Full in-app page: /group/CODE/slots -->
+      <div id="page-group-slots" class="app-subpage" hidden>
+        <div class="card group-slots-intro">
+          <div class="group-slots-toolbar-inner">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeGroupSlotsPage()">
+              <i class="fa-solid fa-arrow-left"></i> Back
+            </button>
+            <div class="group-slots-heading">
+              <h3 id="groupSlotPageTitle">Group · time slots</h3>
+              <label class="group-slot-date-label">
+                <span>Date</span>
+                <input type="date" id="groupSlotPageDate" onchange="reloadGroupSlotsPage()">
+              </label>
+            </div>
+          </div>
+          <p class="group-slots-sub">
+            One card per time slot for the selected day. Admins can attach a final bill image per session; agents can view and download.
+          </p>
+        </div>
+        <div id="groupSlotCards" class="slot-card-grid"></div>
+      </div>
+
+      <div id="mainTabsBundle">
       <!-- Dashboard Tab -->
       <section id="tab-dashboard" class="tab active">
         <!-- Stats Cards -->
@@ -101,7 +124,7 @@
               <input type="text" id="searchInput" placeholder="Search groups..." oninput="filterGroups()">
             </div>
           </div>
-          <p class="dashboard-groups-hint">Tap a group code or the clock button to see each time slot (cards work well on mobile).</p>
+          <p class="dashboard-groups-hint">Tap a group code or the clock button to open the time-slot page (same style as the rest of the app).</p>
           <div class="table-responsive">
             <table class="data-table">
               <thead>
@@ -347,6 +370,7 @@
           </div>
         </div>
       </section>
+      </div>
     </main>
   </div>
 
@@ -384,22 +408,17 @@
     </div>
   </div>
 
-  <!-- Group × timing cards (dashboard drill-down; mobile-friendly) -->
-  <div id="groupSlotOverlay" class="group-slot-overlay" aria-hidden="true">
-    <div class="group-slot-panel" role="dialog" aria-labelledby="groupSlotTitle">
-      <div class="group-slot-toolbar">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="closeGroupSlotDetail()">
-          <i class="fa-solid fa-arrow-left"></i> Back
-        </button>
-        <div class="group-slot-toolbar-meta">
-          <h3 id="groupSlotTitle">Group</h3>
-          <label class="group-slot-date-label">
-            <span>Date</span>
-            <input type="date" id="groupSlotDate" onchange="reloadGroupSlotDetail()">
-          </label>
-        </div>
+  <input type="file" id="billImageUploadInput" accept="image/jpeg,image/png,image/gif,image/webp" hidden>
+
+  <div class="modal" id="billPreviewModal" aria-hidden="true" onclick="if(event.target===this)closeBillPreview()">
+    <div class="modal-content modal-content--bill" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3>Final bill</h3>
+        <button type="button" class="close-btn" onclick="closeBillPreview()" aria-label="Close">&times;</button>
       </div>
-      <div id="groupSlotCards" class="slot-card-grid"></div>
+      <div class="modal-body modal-body--bill">
+        <img id="billPreviewImg" alt="Bill preview">
+      </div>
     </div>
   </div>
 

@@ -9,8 +9,9 @@ let pwaUpdatePending = false;
 let pwaUpdateDismissed = false;
 let lastUserActivityAt = Date.now();
 let userRole = localStorage.getItem("userRole") || "";
-/** When set, group timing overlay is showing this group code. */
+/** When set, group time-slots subpage is open for this group code. */
 let groupSlotDetailCode = null;
+let billUploadTargetSessionId = null;
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -70,6 +71,11 @@ function applyRoleUI() {
 }
 
 function switchTab(tabName, el) {
+  const slotsPage = document.getElementById("page-group-slots");
+  if (slotsPage && !slotsPage.hidden) {
+    history.replaceState({}, "", "/");
+    hideGroupSlotsUI({ skipHistory: true });
+  }
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   document.querySelectorAll(".sidebar nav a").forEach((a) => a.classList.remove("active"));
   document.getElementById("tab-" + tabName).classList.add("active");
@@ -166,13 +172,9 @@ socket.on("dashboard-update", () => {
   if (userRole === "admin") loadGroupsPage();
   if (userRole === "agent") loadMyGroups();
   loadAllSessions();
-  const overlay = document.getElementById("groupSlotOverlay");
-  if (
-    groupSlotDetailCode &&
-    overlay &&
-    overlay.classList.contains("is-open")
-  ) {
-    reloadGroupSlotDetail();
+  const slotsPage = document.getElementById("page-group-slots");
+  if (groupSlotDetailCode && slotsPage && !slotsPage.hidden) {
+    reloadGroupSlotsPage();
   }
 });
 
@@ -182,12 +184,47 @@ document.addEventListener("DOMContentLoaded", async () => {
   applyRoleUI();
   setupInstallPrompt();
   setupPwaUpdateUX();
+  window.addEventListener("popstate", onPopState);
   document.getElementById("sessionDate").value = new Date().toISOString().split("T")[0];
   if (userRole === "admin") await loadAgents();
   await loadDashboard();
   if (userRole === "admin") await loadGroupsPage();
   if (userRole === "agent") await loadMyGroups();
   await loadAllSessions();
+
+  const pathSlots = window.location.pathname.match(/^\/group\/([^/]+)\/slots\/?$/);
+  if (pathSlots) {
+    showGroupSlotsUI(decodeURIComponent(pathSlots[1]).toUpperCase(), {
+      skipHistory: true,
+      preserveDate: false,
+    });
+  }
+
+  const billInput = document.getElementById("billImageUploadInput");
+  if (billInput) {
+    billInput.addEventListener("change", async (e) => {
+      const input = e.target;
+      const sid = billUploadTargetSessionId;
+      billUploadTargetSessionId = null;
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file || !sid) return;
+      const fd = new FormData();
+      fd.append("bill", file);
+      const res = await fetch(`/api/sessions/${sid}/bill`, {
+        method: "POST",
+        headers: { "x-auth-token": localStorage.getItem("authToken") || "" },
+        body: fd,
+      });
+      if (res.status === 401) return logout();
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        return showToast(d.error || "Upload failed", "error");
+      }
+      showToast("Bill uploaded");
+      reloadGroupSlotsPage();
+    });
+  }
 
   const openGroupFromClick = (e) => {
     const t = e.target.closest("[data-open-group]");
@@ -364,39 +401,124 @@ function formatSessionDateTime(iso) {
   }
 }
 
-function openGroupSlotDetail(code) {
-  if (!code) return;
-  groupSlotDetailCode = String(code).trim().toUpperCase();
-  const overlay = document.getElementById("groupSlotOverlay");
-  const dateEl = document.getElementById("groupSlotDate");
-  if (dateEl) {
+function billViewUrl(sessionId) {
+  const t = encodeURIComponent(localStorage.getItem("authToken") || "");
+  return `/api/sessions/${sessionId}/bill/view?token=${t}`;
+}
+
+function billDownloadUrl(sessionId) {
+  const t = encodeURIComponent(localStorage.getItem("authToken") || "");
+  return `/api/sessions/${sessionId}/bill/file?token=${t}`;
+}
+
+function downloadSessionBill(sessionId) {
+  window.open(billDownloadUrl(sessionId), "_blank");
+}
+
+function openBillPreview(sessionId) {
+  const img = document.getElementById("billPreviewImg");
+  const modal = document.getElementById("billPreviewModal");
+  if (!img || !modal) return;
+  img.src = billViewUrl(sessionId);
+  modal.classList.add("show");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeBillPreview() {
+  const img = document.getElementById("billPreviewImg");
+  const modal = document.getElementById("billPreviewModal");
+  if (img) img.src = "";
+  if (modal) {
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+  }
+}
+
+function triggerBillUpload(sessionId) {
+  billUploadTargetSessionId = sessionId;
+  document.getElementById("billImageUploadInput")?.click();
+}
+
+async function removeSessionBill(sessionId) {
+  if (!confirm("Remove this bill image? This cannot be undone.")) return;
+  const res = await fetch(`/api/sessions/${sessionId}/bill`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (res.status === 401) return logout();
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    return showToast(d.error || "Could not remove bill", "error");
+  }
+  showToast("Bill removed");
+  reloadGroupSlotsPage();
+}
+
+function onPopState() {
+  const m = window.location.pathname.match(/^\/group\/([^/]+)\/slots\/?$/);
+  if (m) {
+    showGroupSlotsUI(decodeURIComponent(m[1]).toUpperCase(), {
+      skipHistory: true,
+      preserveDate: true,
+    });
+  } else {
+    hideGroupSlotsUI({ skipHistory: true });
+    document.getElementById("pageTitle").textContent = "Dashboard";
+  }
+}
+
+function showGroupSlotsUI(code, opts = {}) {
+  groupSlotDetailCode = code;
+  const bundle = document.getElementById("mainTabsBundle");
+  const page = document.getElementById("page-group-slots");
+  if (bundle) bundle.hidden = true;
+  if (page) page.hidden = false;
+  const titleEl = document.getElementById("groupSlotPageTitle");
+  if (titleEl) titleEl.textContent = `${code} · time slots`;
+  document.getElementById("pageTitle").textContent = `${code} · slots`;
+  const dateEl = document.getElementById("groupSlotPageDate");
+  if (dateEl && !opts.preserveDate) {
     dateEl.value = new Date().toISOString().split("T")[0];
   }
-  if (overlay) {
-    overlay.classList.add("is-open");
-    overlay.setAttribute("aria-hidden", "false");
-  }
-  document.body.style.overflow = "hidden";
-  reloadGroupSlotDetail();
+  closeSidebar();
+  reloadGroupSlotsPage();
 }
 
-function closeGroupSlotDetail() {
+function hideGroupSlotsUI() {
   groupSlotDetailCode = null;
-  const overlay = document.getElementById("groupSlotOverlay");
-  if (overlay) {
-    overlay.classList.remove("is-open");
-    overlay.setAttribute("aria-hidden", "true");
-  }
-  document.body.style.overflow = "";
+  const bundle = document.getElementById("mainTabsBundle");
+  const page = document.getElementById("page-group-slots");
+  if (bundle) bundle.hidden = false;
+  if (page) page.hidden = true;
 }
 
-async function reloadGroupSlotDetail() {
+function openGroupSlotDetail(code) {
+  if (!code) return;
+  const c = String(code).trim().toUpperCase();
+  history.pushState({ klView: "group-slots", code: c }, "", `/group/${encodeURIComponent(c)}/slots`);
+  showGroupSlotsUI(c, { skipHistory: true, preserveDate: false });
+}
+
+function closeGroupSlotsPage() {
+  if (window.history.state && window.history.state.klView === "group-slots") {
+    history.back();
+  } else {
+    history.replaceState({}, "", "/");
+    hideGroupSlotsUI();
+    document.getElementById("pageTitle").textContent = "Dashboard";
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    const dash = document.getElementById("tab-dashboard");
+    if (dash) dash.classList.add("active");
+    document.querySelectorAll(".sidebar nav a").forEach((a) => a.classList.remove("active"));
+    document.getElementById("navDashboard")?.classList.add("active");
+  }
+}
+
+async function reloadGroupSlotsPage() {
   if (!groupSlotDetailCode) return;
-  const dateEl = document.getElementById("groupSlotDate");
+  const dateEl = document.getElementById("groupSlotPageDate");
   const date = dateEl?.value || new Date().toISOString().split("T")[0];
-  const title = document.getElementById("groupSlotTitle");
   const cards = document.getElementById("groupSlotCards");
-  if (title) title.textContent = `${groupSlotDetailCode} · time slots`;
   if (cards) {
     cards.innerHTML =
       '<p class="empty" style="grid-column:1/-1;text-align:center;padding:24px;">Loading…</p>';
@@ -409,10 +531,12 @@ async function reloadGroupSlotDetail() {
     if (res.status === 401) return logout();
     if (res.status === 403 || res.status === 404) {
       showToast("Could not load this group.", "error");
-      closeGroupSlotDetail();
+      closeGroupSlotsPage();
       return;
     }
     const data = await res.json();
+    const titleEl = document.getElementById("groupSlotPageTitle");
+    if (titleEl) titleEl.textContent = `${data.code} · time slots · ${data.date}`;
     renderGroupSlotCards(data);
   } catch (e) {
     console.error(e);
@@ -428,6 +552,7 @@ function renderGroupSlotCards(data) {
   if (!cards) return;
   const slots = data.slots || [];
   const dateLabel = escapeHtml(data.date || "");
+  const isAdmin = userRole === "admin";
   if (!slots.length) {
     cards.innerHTML = `<p class="empty" style="grid-column:1/-1;text-align:center;padding:24px;">No time slots configured for this group.</p>`;
     return;
@@ -438,7 +563,7 @@ function renderGroupSlotCards(data) {
       if (!session) {
         return `<article class="slot-card">
           <h4><span>${slotEsc}</span><span class="badge badge-idle">Idle</span></h4>
-          <p class="slot-card-meta">No session on ${dateLabel}.</p>
+          <p class="slot-card-meta">No session on ${dateLabel}. Final bill can be added once a session exists for this slot.</p>
         </article>`;
       }
       const statusClass = "badge badge-" + session.status;
@@ -450,6 +575,37 @@ function renderGroupSlotCards(data) {
       const endedRow = session.ended_at
         ? `<span><strong>Ended:</strong> ${escapeHtml(formatSessionDateTime(session.ended_at))}</span>`
         : "";
+
+      let billBlock = "";
+      if (session.has_bill) {
+        const vUrl = billViewUrl(session.id);
+        billBlock = `
+        <div class="slot-bill-block">
+          <p class="slot-bill-label"><strong>Final bill</strong></p>
+          <div class="slot-bill-thumb-wrap">
+            <img src="${vUrl}" alt="" class="slot-bill-thumb" loading="lazy" onclick="openBillPreview(${session.id})" />
+          </div>
+          <div class="slot-card-actions slot-bill-actions">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openBillPreview(${session.id})"><i class="fa-solid fa-eye"></i> View</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="downloadSessionBill(${session.id})"><i class="fa-solid fa-download"></i> Download</button>
+            ${
+              isAdmin
+                ? `<button type="button" class="btn btn-danger btn-sm" onclick="removeSessionBill(${session.id})"><i class="fa-solid fa-trash"></i> Remove bill</button>`
+                : ""
+            }
+          </div>
+        </div>`;
+      } else if (isAdmin) {
+        billBlock = `
+        <div class="slot-bill-block">
+          <p class="slot-bill-label"><strong>Final bill</strong></p>
+          <p class="slot-bill-hint">JPEG, PNG, GIF, or WebP · max 8 MB.</p>
+          <button type="button" class="btn btn-primary btn-sm" onclick="triggerBillUpload(${session.id})"><i class="fa-solid fa-upload"></i> Upload bill</button>
+        </div>`;
+      } else {
+        billBlock = `<div class="slot-bill-block"><p class="slot-bill-hint muted">No final bill uploaded yet for this session.</p></div>`;
+      }
+
       return `<article class="slot-card">
         <h4><span>${slotEsc}</span><span class="${statusClass}">${statusLabel}</span></h4>
         <div class="slot-card-meta">
@@ -459,6 +615,7 @@ function renderGroupSlotCards(data) {
           ${endedRow}
         </div>
         <div class="slot-card-actions">${excelBtn}</div>
+        ${billBlock}
       </article>`;
     })
     .join("");

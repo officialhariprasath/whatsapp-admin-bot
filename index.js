@@ -11,6 +11,7 @@ const JSZip = require("jszip");
 const { XMLParser, XMLBuilder } = require("fast-xml-parser");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
+const multer = require("multer");
 require("dotenv").config();
 
 const db = require("./db");
@@ -21,6 +22,11 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 
 app.use(express.json());
 app.use(cors());
+
+app.get("/group/:code/slots", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 app.use(express.static("public"));
 
 const userState = {}; // temporary state for interactive selections
@@ -34,6 +40,7 @@ function emitUpdate() {
 }
 
 const EXPORTS_DIR = path.join(__dirname, "exports");
+const BILLS_DIR = path.join(__dirname, "uploads", "bills");
 const SESSION_TEMPLATE_PATH = path.join(__dirname, "template_excel", "lottery_output.xlsm");
 const XLSM_MIME = "application/vnd.ms-excel.sheet.macroEnabled.12";
 const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
@@ -41,6 +48,63 @@ const xmlBuilder = new XMLBuilder({ ignoreAttributes: false, attributeNamePrefix
 
 function ensureExportsDir() {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
+}
+
+function ensureBillsDir() {
+  fs.mkdirSync(BILLS_DIR, { recursive: true });
+}
+
+function mimeFromBillPath(filePath) {
+  const ext = path.extname(filePath || "").toLowerCase();
+  const map = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+const billImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      ensureBillsDir();
+      cb(null, BILLS_DIR);
+    },
+    filename: (req, file, cb) => {
+      const id = String(req.params.id || "0");
+      const ext = path.extname(file.originalname || "").toLowerCase();
+      const safeExt = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext) ? ext : ".jpg";
+      cb(null, `bill_${id}_${Date.now()}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|png|gif|webp)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error("Only JPEG, PNG, GIF, or WebP images are allowed"));
+  },
+});
+
+async function loadSessionBillForRequest(req, res) {
+  const sessionId = Number(req.params.id);
+  if (!Number.isFinite(sessionId)) {
+    res.status(400).json({ error: "Invalid session" });
+    return null;
+  }
+  const session = await db.getSessionById(sessionId);
+  if (!session || !session.bill_image_path || !fs.existsSync(session.bill_image_path)) {
+    res.status(404).json({ error: "Bill not found" });
+    return null;
+  }
+  if (
+    req.user.role === "agent" &&
+    !(await db.agentCanAccessGroup(req.user.agentId, session.group_code))
+  ) {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return session;
 }
 
 async function uploadWhatsAppMediaForDocument(filePath, fileName) {
@@ -583,6 +647,7 @@ app.get("/api/dashboard/groups/:code/slot-detail", resolveUser, async (req, res)
               created_at: session.created_at,
               ended_at: session.ended_at,
               has_excel: Boolean(session.excel_path),
+              has_bill: Boolean(session.bill_image_path),
             }
           : null,
       };
@@ -612,6 +677,106 @@ app.get("/api/dashboard/sessions/:id", resolveUser, async (req, res) => {
     res.json({ ...session, messages });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(
+  "/api/sessions/:id/bill",
+  resolveUser,
+  requireAdmin,
+  (req, res, next) => {
+    billImageUpload.single("bill")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ error: err.message || "Upload failed" });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const sessionId = Number(req.params.id);
+      if (!Number.isFinite(sessionId)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {}
+        return res.status(400).json({ error: "Invalid session" });
+      }
+      const session = await db.getSessionById(sessionId);
+      if (!session) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {}
+        return res.status(404).json({ error: "Session not found" });
+      }
+      if (session.bill_image_path && fs.existsSync(session.bill_image_path)) {
+        try {
+          fs.unlinkSync(session.bill_image_path);
+        } catch {}
+      }
+      await db.setSessionBillImagePath(sessionId, req.file.path);
+      emitUpdate();
+      res.json({ success: true });
+    } catch (e) {
+      if (req.file?.path) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {}
+      }
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+app.delete("/api/sessions/:id/bill", resolveUser, requireAdmin, async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    if (!Number.isFinite(sessionId)) {
+      return res.status(400).json({ error: "Invalid session" });
+    }
+    const session = await db.getSessionById(sessionId);
+    if (!session) return res.status(404).json({ error: "Session not found" });
+    const oldPath = await db.clearSessionBillImage(sessionId);
+    if (oldPath && fs.existsSync(oldPath)) {
+      try {
+        fs.unlinkSync(oldPath);
+      } catch {}
+    }
+    emitUpdate();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/sessions/:id/bill/view", resolveUser, async (req, res) => {
+  try {
+    const session = await loadSessionBillForRequest(req, res);
+    if (!session) return;
+    const abs = path.resolve(session.bill_image_path);
+    res.setHeader("Content-Type", mimeFromBillPath(abs));
+    res.setHeader("Cache-Control", "private, max-age=120");
+    res.setHeader("Content-Disposition", 'inline; filename="bill"');
+    res.sendFile(abs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/sessions/:id/bill/file", resolveUser, async (req, res) => {
+  try {
+    const session = await loadSessionBillForRequest(req, res);
+    if (!session) return;
+    const abs = path.resolve(session.bill_image_path);
+    const base = `bill-${session.group_code}-${session.slot}-${session.session_date}`
+      .replace(/[^\w.-]+/g, "_")
+      .slice(0, 120);
+    const ext = path.extname(abs) || ".jpg";
+    res.setHeader("Content-Type", mimeFromBillPath(abs));
+    res.setHeader("Content-Disposition", `attachment; filename="${base}${ext}"`);
+    res.sendFile(abs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -782,6 +947,14 @@ app.post("/api/settings/reset", resolveUser, requireAdmin, async (req, res) => {
       }
     }
 
+    ensureBillsDir();
+    const billFiles = fs.existsSync(BILLS_DIR) ? fs.readdirSync(BILLS_DIR) : [];
+    for (const file of billFiles) {
+      try {
+        fs.unlinkSync(path.join(BILLS_DIR, file));
+      } catch {}
+    }
+
     // Reset database
     await db.resetDatabase();
 
@@ -903,6 +1076,7 @@ io.on("connection", (socket) => {
     await db.init();
     await db.initTables();
     ensureExportsDir();
+    ensureBillsDir();
     httpServer.listen(process.env.PORT, () => {
       console.log(`🚀 Server running on port ${process.env.PORT}`);
     });

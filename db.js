@@ -152,6 +152,10 @@ async function initTables() {
       "CREATE INDEX IF NOT EXISTS idx_group_agents_agent_id ON group_agents(agent_id)"
     );
 
+    await conn.query(
+      `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bill_image_path VARCHAR(512) DEFAULT NULL`
+    );
+
     console.log("✅ Database tables initialized");
   } finally {
     conn.release();
@@ -326,6 +330,22 @@ async function getSessionByKey(group_code, slot, session_date) {
 async function getSessionById(id) {
   const { rows } = await pool.query("SELECT * FROM sessions WHERE id = $1", [id]);
   return rows[0] || null;
+}
+
+async function setSessionBillImagePath(sessionId, filePath) {
+  await pool.query("UPDATE sessions SET bill_image_path = $1 WHERE id = $2", [
+    filePath,
+    sessionId,
+  ]);
+}
+
+/** Clears DB path; returns previous filesystem path if any (caller deletes file). */
+async function clearSessionBillImage(sessionId) {
+  const session = await getSessionById(sessionId);
+  if (!session) return null;
+  const old = session.bill_image_path;
+  await pool.query("UPDATE sessions SET bill_image_path = NULL WHERE id = $1", [sessionId]);
+  return old;
 }
 
 async function addMessage(session_id, content) {
@@ -587,6 +607,8 @@ module.exports = {
   getActiveSession,
   getSessionByKey,
   getSessionById,
+  setSessionBillImagePath,
+  clearSessionBillImage,
   addMessage,
   endSession,
   getSessions,

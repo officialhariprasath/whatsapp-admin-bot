@@ -510,48 +510,38 @@ body {
   gap: 8px;
 }
 
-/* Group × time slot drill-down (dashboard) */
-.group-slot-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 380;
-  background: var(--bg);
-  flex-direction: column;
-  overflow: hidden;
-  animation: fadeIn 0.2s ease;
+/* Group time slots subpage (/group/CODE/slots) */
+.app-subpage {
+  animation: fadeIn 0.25s ease;
 }
-.group-slot-overlay.is-open {
-  display: flex;
+.app-subpage[hidden] {
+  display: none !important;
 }
-.group-slot-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  width: 100%;
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 0 24px 28px;
+.group-slots-intro {
+  margin-bottom: 20px;
 }
-.group-slot-toolbar {
+.group-slots-toolbar-inner {
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  padding: 20px 0 18px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
-.group-slot-toolbar-meta {
+.group-slots-heading {
   flex: 1;
-  min-width: 0;
+  min-width: 200px;
 }
-.group-slot-toolbar-meta h3 {
+.group-slots-heading h3 {
   font-size: 1.2rem;
   font-weight: 700;
-  margin-bottom: 10px;
+  margin: 0 0 10px;
   word-break: break-word;
+}
+.group-slots-sub {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 .group-slot-date-label {
   display: flex;
@@ -559,15 +549,66 @@ body {
   gap: 4px;
   font-size: 0.75rem;
   color: var(--text-muted);
-  max-width: 200px;
+  max-width: 220px;
 }
 .group-slot-date-label input {
-  background: var(--card);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
   color: var(--text);
   font-size: 0.9rem;
+}
+.slot-bill-block {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.slot-bill-label {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+.slot-bill-hint {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.slot-bill-hint.muted {
+  font-style: italic;
+}
+.slot-bill-thumb-wrap {
+  margin-bottom: 10px;
+}
+.slot-bill-thumb {
+  max-width: 100%;
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  object-fit: contain;
+  background: var(--bg);
+  display: block;
+}
+.slot-bill-actions {
+  margin-top: 10px;
+}
+.modal-content--bill {
+  max-width: min(96vw, 920px);
+}
+.modal-body--bill {
+  padding: 0 !important;
+  background: #0a0f1a;
+  max-height: 85vh;
+  overflow: auto;
+  display: block !important;
+}
+.modal-body--bill img {
+  width: 100%;
+  height: auto;
+  display: block;
+  vertical-align: middle;
 }
 .slot-card-grid {
   display: grid;

@@ -391,6 +391,18 @@ async function getSessionsByDate(session_date) {
   return rows;
 }
 
+/** Latest session row per time slot for a group on a given calendar day. */
+async function getSessionsForGroupOnDate(group_code, session_date) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (slot) *
+     FROM sessions
+     WHERE group_code = $1 AND session_date = $2::date
+     ORDER BY slot ASC, id DESC`,
+    [group_code, session_date]
+  );
+  return rows;
+}
+
 async function getDashboardStats(session_date) {
   const { rows: groupCount } = await pool.query("SELECT COUNT(*)::int AS count FROM groups_table");
   const { rows: activeSessions } = await pool.query(
@@ -587,6 +599,7 @@ module.exports = {
   agentCanAccessGroup,
   getSessionsByGroup,
   getSessionsByDate,
+  getSessionsForGroupOnDate,
   listAgents,
   createAgent,
   getAgentById,

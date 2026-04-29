@@ -545,6 +545,37 @@ app.get("/api/dashboard/sessions", resolveUser, async (req, res) => {
   }
 });
 
+/** Per–time-slot status for one group on a date (admin + assigned agents). */
+app.get("/api/dashboard/group/:code/slots", resolveUser, async (req, res) => {
+  try {
+    const code = String(req.params.code || "")
+      .trim()
+      .toUpperCase();
+    const date = req.query.date || today();
+    const group = await db.getGroup(code);
+    if (!group) {
+      return res.status(404).json({ error: "Group not found" });
+    }
+    if (req.user.role === "agent") {
+      const ok = await db.agentCanAccessGroup(req.user.agentId, code);
+      if (!ok) return res.status(403).json({ error: "Forbidden" });
+    }
+    const times = Array.isArray(group.times) ? group.times : [];
+    const sessions = await db.getSessionsForGroupOnDate(code, date);
+    const bySlot = {};
+    for (const s of sessions) {
+      bySlot[s.slot] = s;
+    }
+    const slots = times.map((label) => ({
+      label,
+      session: bySlot[label] || null,
+    }));
+    res.json({ code: group.code, times, date, slots });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/dashboard/sessions/:id", resolveUser, async (req, res) => {
   try {
     const session = await db.getSessionById(req.params.id);

@@ -9,6 +9,8 @@ let pwaUpdatePending = false;
 let pwaUpdateDismissed = false;
 let lastUserActivityAt = Date.now();
 let userRole = localStorage.getItem("userRole") || "";
+/** When set, user is on the per–time-slot group view (not a sidebar tab). */
+let groupSlotsViewCode = null;
 
 function getAuthHeaders() {
   return {
@@ -60,6 +62,10 @@ function applyRoleUI() {
 }
 
 function switchTab(tabName, el) {
+  if (tabName !== "group-slots") {
+    groupSlotsViewCode = null;
+    stripGroupSlotsQuery();
+  }
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   document.querySelectorAll(".sidebar nav a").forEach((a) => a.classList.remove("active"));
   document.getElementById("tab-" + tabName).classList.add("active");
@@ -74,6 +80,182 @@ function switchTab(tabName, el) {
   };
   document.getElementById("pageTitle").textContent = titles[tabName] || "Dashboard";
   closeSidebar();
+}
+
+function stripGroupSlotsQuery() {
+  const u = new URL(location.href);
+  if (u.searchParams.get("view") !== "slots") return;
+  u.searchParams.delete("view");
+  u.searchParams.delete("group");
+  u.searchParams.delete("date");
+  const q = u.searchParams.toString();
+  history.replaceState(null, "", q ? `${u.pathname}?${q}` : u.pathname);
+}
+
+function buildUrlWithGroupSlots(code) {
+  const u = new URL(location.href);
+  u.searchParams.set("view", "slots");
+  u.searchParams.set("group", code);
+  const d = document.getElementById("groupSlotsDate")?.value;
+  if (d) u.searchParams.set("date", d);
+  else u.searchParams.delete("date");
+  return u.pathname + u.search;
+}
+
+function showGroupSlotsView(code, opts = {}) {
+  if (opts.newTab) {
+    const u = new URL(location.origin + location.pathname);
+    u.searchParams.set("view", "slots");
+    u.searchParams.set("group", String(code || "").trim().toUpperCase());
+    const d = document.getElementById("groupSlotsDate")?.value;
+    if (d) u.searchParams.set("date", d);
+    window.open(u.toString(), "_blank", "noopener");
+    return;
+  }
+  const c = String(code || "")
+    .trim()
+    .toUpperCase();
+  if (!c) return;
+  groupSlotsViewCode = c;
+  const di = document.getElementById("groupSlotsDate");
+  if (di && !opts.preserveDate) {
+    di.value = new Date().toISOString().split("T")[0];
+  }
+  if (!opts.fromUrl) {
+    history.replaceState(null, "", buildUrlWithGroupSlots(c));
+  }
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  document.getElementById("tab-group-slots").classList.add("active");
+  document.querySelectorAll(".sidebar nav a").forEach((a) => a.classList.remove("active"));
+  document.getElementById("pageTitle").textContent = `Group ${c}`;
+  const sub = document.getElementById("groupSlotsSubtitle");
+  if (sub) {
+    sub.textContent =
+      "One card per configured time slot — status for the selected date (idle, live, or Excel ready).";
+  }
+  closeSidebar();
+  loadGroupSlotsDetail();
+}
+
+function backFromGroupSlotsView() {
+  groupSlotsViewCode = null;
+  const nav = document.getElementById("navDashboard");
+  if (nav) switchTab("dashboard", nav);
+}
+
+function openGroupSlotsInNewTab() {
+  if (!groupSlotsViewCode) return;
+  const u = new URL(location.origin + location.pathname);
+  u.searchParams.set("view", "slots");
+  u.searchParams.set("group", groupSlotsViewCode);
+  const d = document.getElementById("groupSlotsDate")?.value;
+  if (d) u.searchParams.set("date", d);
+  window.open(u.toString(), "_blank", "noopener");
+}
+
+function groupSlotsDownloadReport() {
+  if (groupSlotsViewCode) downloadGroupReport(groupSlotsViewCode);
+}
+
+function tryOpenGroupSlotsFromUrl() {
+  const p = new URLSearchParams(location.search);
+  if (p.get("view") !== "slots" || !p.get("group")) return;
+  const code = p.get("group").trim().toUpperCase();
+  const dateQ = p.get("date");
+  const di = document.getElementById("groupSlotsDate");
+  if (di && dateQ) di.value = dateQ;
+  showGroupSlotsView(code, { fromUrl: true, preserveDate: !!dateQ });
+}
+
+async function loadGroupSlotsDetail() {
+  if (!groupSlotsViewCode) return;
+  const wrap = document.getElementById("groupSlotCards");
+  if (!wrap) return;
+  const dateEl = document.getElementById("groupSlotsDate");
+  const date = dateEl?.value || new Date().toISOString().split("T")[0];
+  wrap.innerHTML = '<p class="empty">Loading…</p>';
+  try {
+    const res = await fetch(
+      `/api/dashboard/group/${encodeURIComponent(groupSlotsViewCode)}/slots?date=${encodeURIComponent(date)}`,
+      { headers: getAuthHeaders() }
+    );
+    if (res.status === 401) return logout();
+    if (res.status === 403) {
+      showToast("You cannot access this group.", "error");
+      backFromGroupSlotsView();
+      return;
+    }
+    if (res.status === 404) {
+      showToast("Group not found.", "error");
+      backFromGroupSlotsView();
+      return;
+    }
+    const data = await res.json();
+    history.replaceState(null, "", buildUrlWithGroupSlots(groupSlotsViewCode));
+    renderGroupSlotCards(data);
+  } catch (e) {
+    console.error(e);
+    wrap.innerHTML = '<p class="empty">Could not load slot details.</p>';
+  }
+}
+
+function renderGroupSlotCards(payload) {
+  const wrap = document.getElementById("groupSlotCards");
+  if (!wrap) return;
+  if (!payload.slots || !payload.slots.length) {
+    wrap.innerHTML =
+      '<p class="empty">No time slots configured for this group.</p>';
+    return;
+  }
+  wrap.innerHTML = payload.slots
+    .map(({ label, session }) => {
+      if (!session) {
+        return `<div class="slot-card slot-idle">
+        <div class="slot-card-header"><strong>${escapeHtml(
+          label
+        )}</strong><span class="badge badge-idle">Idle</span></div>
+        <div class="slot-card-body"><p>No session on this date.</p></div>
+      </div>`;
+      }
+      const st = session.status || "idle";
+      const statusLabel = String(st).replace(/_/g, " ");
+      const excelBtn =
+        st === "excel_ready" && session.id
+          ? `<button type="button" class="btn btn-success btn-sm" onclick="downloadExcel(${session.id})"><i class="fa-solid fa-download"></i> Excel</button>`
+          : "";
+      const owner = session.owner_phone ? escapeHtml(session.owner_phone) : "—";
+      const msgs = session.message_count ?? 0;
+      const start = session.created_at
+        ? new Date(session.created_at).toLocaleString()
+        : "—";
+      const end = session.ended_at
+        ? new Date(session.ended_at).toLocaleString()
+        : null;
+      return `<div class="slot-card">
+      <div class="slot-card-header">
+        <strong>${escapeHtml(label)}</strong>
+        <span class="badge badge-${st}">${escapeHtml(statusLabel)}</span>
+      </div>
+      <div class="slot-card-body">
+        <div class="slot-meta">
+          <span><strong>Messages:</strong> ${msgs}</span>
+          <span><strong>Owner:</strong> ${owner}</span>
+          <span><strong>Started:</strong> ${escapeHtml(start)}</span>
+          ${
+            end
+              ? `<span><strong>Ended:</strong> ${escapeHtml(end)}</span>`
+              : ""
+          }
+        </div>
+      </div>
+      ${
+        excelBtn
+          ? `<div class="slot-card-actions">${excelBtn}</div>`
+          : ""
+      }
+    </div>`;
+    })
+    .join("");
 }
 
 function refreshApp() {
@@ -155,6 +337,7 @@ socket.on("dashboard-update", () => {
   loadDashboard();
   if (userRole === "admin") loadGroupsPage();
   if (userRole === "agent") loadMyGroups();
+  if (groupSlotsViewCode) loadGroupSlotsDetail();
   loadAllSessions();
 });
 
@@ -170,6 +353,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (userRole === "admin") await loadGroupsPage();
   if (userRole === "agent") await loadMyGroups();
   await loadAllSessions();
+  tryOpenGroupSlotsFromUrl();
 });
 
 async function syncUserRole() {
@@ -296,16 +480,19 @@ function renderDashboardTable() {
         g.status === "excel_ready" && g.session_id
           ? `<button class="btn btn-success btn-sm" onclick="downloadExcel(${g.session_id})"><i class="fa-solid fa-download"></i> Excel</button>`
           : "";
+      const gc = JSON.stringify(g.group_code);
       return `
       <tr>
-        <td><strong>${g.group_code}</strong></td>
+        <td><button type="button" class="btn-text-link" onclick="showGroupSlotsView(${gc})" title="Open by time slot">${g.group_code}</button></td>
         <td>${formatTimesCell(g.times)}</td>
         <td><span class="${statusClass}">${statusLabel}</span></td>
         <td>${g.slot || "-"}</td>
         <td>${g.message_count || 0}</td>
         <td>${g.owner_phone || "-"}</td>
         <td class="actions">
-          <button class="btn btn-success btn-sm" onclick="downloadGroupReport('${g.group_code}')" title="Group Report"><i class="fa-solid fa-chart-bar"></i></button>
+          <button class="btn btn-primary btn-sm" onclick="showGroupSlotsView(${gc})" title="By time slot"><i class="fa-solid fa-table-cells"></i></button>
+          <button class="btn btn-secondary btn-sm" onclick="showGroupSlotsView(${gc}, { newTab: true })" title="Open in new tab"><i class="fa-solid fa-up-right-from-square"></i></button>
+          <button class="btn btn-success btn-sm" onclick="downloadGroupReport(${gc})" title="Group Report"><i class="fa-solid fa-chart-bar"></i></button>
           ${downloadBtn}
         </td>
       </tr>`;
@@ -349,10 +536,14 @@ async function loadMyGroups() {
               day: "numeric",
             })
           : "—";
+        const gc = JSON.stringify(g.code);
         return `<tr>
-        <td><strong>${escapeHtml(g.code)}</strong></td>
+        <td><button type="button" class="btn-text-link" onclick="showGroupSlotsView(${gc})">${escapeHtml(
+          g.code
+        )}</button></td>
         <td>${escapeHtml(slots)}</td>
         <td>${escapeHtml(created)}</td>
+        <td><button type="button" class="btn btn-primary btn-sm" onclick="showGroupSlotsView(${gc})"><i class="fa-solid fa-table-cells"></i> Slots</button></td>
       </tr>`;
       })
       .join("");

@@ -51,6 +51,12 @@ function applyRoleUI() {
   document.querySelectorAll(".js-agent-only").forEach((el) => {
     el.style.display = isAdmin ? "none" : "";
   });
+  const dashboardGroupsTitle = document.getElementById("dashboardGroupsTitle");
+  if (dashboardGroupsTitle) {
+    dashboardGroupsTitle.textContent = isAdmin
+      ? "Group status overview"
+      : "Your assigned groups";
+  }
 }
 
 function switchTab(tabName, el) {
@@ -58,8 +64,10 @@ function switchTab(tabName, el) {
   document.querySelectorAll(".sidebar nav a").forEach((a) => a.classList.remove("active"));
   document.getElementById("tab-" + tabName).classList.add("active");
   el.classList.add("active");
+  if (tabName === "mygroups" && userRole === "agent") loadMyGroups();
   const titles = {
     dashboard: "Dashboard",
+    mygroups: "My groups",
     groups: "Groups",
     sessions: "Session History",
     settings: "Settings",
@@ -146,6 +154,7 @@ function renderAgentCheckboxes(containerId, selected = []) {
 socket.on("dashboard-update", () => {
   loadDashboard();
   if (userRole === "admin") loadGroupsPage();
+  if (userRole === "agent") loadMyGroups();
   loadAllSessions();
 });
 
@@ -159,6 +168,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (userRole === "admin") await loadAgents();
   await loadDashboard();
   if (userRole === "admin") await loadGroupsPage();
+  if (userRole === "agent") await loadMyGroups();
   await loadAllSessions();
 });
 
@@ -260,10 +270,19 @@ async function loadDashboard() {
   }
 }
 
+function formatTimesCell(times) {
+  if (Array.isArray(times)) return times.join(", ");
+  if (typeof times === "string") return times;
+  return "";
+}
+
 function renderDashboardTable() {
   const tbody = document.getElementById("dashboardTable");
+  const q = (currentSearch || "").toLowerCase();
   const filtered = dashboardData.filter((g) =>
-    g.group_code.toLowerCase().includes(currentSearch.toLowerCase())
+    String(g.group_code || "")
+      .toLowerCase()
+      .includes(q)
   );
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="7" class="empty">No groups found</td></tr>`;
@@ -280,7 +299,7 @@ function renderDashboardTable() {
       return `
       <tr>
         <td><strong>${g.group_code}</strong></td>
-        <td>${(g.times || []).join(", ")}</td>
+        <td>${formatTimesCell(g.times)}</td>
         <td><span class="${statusClass}">${statusLabel}</span></td>
         <td>${g.slot || "-"}</td>
         <td>${g.message_count || 0}</td>
@@ -297,6 +316,51 @@ function renderDashboardTable() {
 function filterGroups() {
   currentSearch = document.getElementById("searchInput").value || "";
   renderDashboardTable();
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function loadMyGroups() {
+  if (userRole !== "agent") return;
+  const tbody = document.getElementById("myGroupsTable");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/groups", { headers: getAuthHeaders() });
+    if (res.status === 401) return logout();
+    const groups = await res.json();
+    if (!Array.isArray(groups) || !groups.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="3" class="empty">No groups assigned yet. Ask an admin to assign you.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = groups
+      .map((g) => {
+        const slots = formatTimesCell(g.times) || "—";
+        const created = g.created_at
+          ? new Date(g.created_at).toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })
+          : "—";
+        return `<tr>
+        <td><strong>${escapeHtml(g.code)}</strong></td>
+        <td>${escapeHtml(slots)}</td>
+        <td>${escapeHtml(created)}</td>
+      </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML =
+      '<tr><td colspan="3" class="empty">Could not load your groups. Try again.</td></tr>';
+  }
 }
 
 async function loadAgents() {

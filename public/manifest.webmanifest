@@ -1,7 +1,7 @@
 {
-  "name": "WhatsApp Admin Bot Dashboard",
-  "short_name": "WA Admin Bot",
-  "description": "Admin dashboard for WhatsApp session tracking and Excel exports.",
+  "name": "KL Bot Dashboard",
+  "short_name": "KL Bot",
+  "description": "KL Bot dashboard for WhatsApp session tracking and Excel exports.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

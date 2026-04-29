@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0f172a">
-  <title>WhatsApp Admin Bot Dashboard</title>
+  <title>KL Bot Dashboard</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/icon-192.png">
@@ -18,10 +18,11 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <i class="fa-brands fa-whatsapp"></i>
-        <span>WA Admin Bot</span>
+        <span>KL Bot</span>
       </div>
       <nav>
         <a href="#" class="active" onclick="switchTab('dashboard', this); closeSidebar();"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        <a href="#" class="js-agent-only" onclick="switchTab('mygroups', this); closeSidebar();"><i class="fa-solid fa-circle-check"></i> My Groups</a>
         <a href="#" class="js-admin-only" onclick="switchTab('groups', this); closeSidebar();"><i class="fa-solid fa-users"></i> Groups</a>
         <a href="#" onclick="switchTab('sessions', this); closeSidebar();"><i class="fa-solid fa-clock-rotate-left"></i> All Sessions</a>
         <a href="#" onclick="switchTab('settings', this); closeSidebar();"><i class="fa-solid fa-gear"></i> Settings</a>
@@ -91,10 +92,10 @@
           </div>
         </div>
 
-        <!-- Groups Table -->
-        <div class="card js-admin-only">
+        <!-- Groups table: visible to admin + agent (scoped by API) -->
+        <div class="card">
           <div class="card-header">
-            <h3><i class="fa-solid fa-list"></i> Group Status Overview</h3>
+            <h3><i class="fa-solid fa-list"></i> <span id="dashboardGroupsTitle">Group status overview</span></h3>
             <div class="search-box">
               <i class="fa-solid fa-search"></i>
               <input type="text" id="searchInput" placeholder="Search groups..." oninput="filterGroups()">
@@ -115,6 +116,32 @@
               </thead>
               <tbody id="dashboardTable">
                 <tr><td colspan="7" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Agent: approved / assigned groups (read-only) -->
+      <section id="tab-mygroups" class="tab js-agent-only">
+        <div class="card">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-circle-check"></i> Your approved groups</h3>
+          </div>
+          <p style="padding:0 24px 12px;color:var(--text-muted);font-size:0.9rem;">
+            These are the groups an admin has assigned to you. Use <strong>Dashboard</strong> for today’s live status.
+          </p>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Group code</th>
+                  <th>Time slots</th>
+                  <th>Assigned</th>
+                </tr>
+              </thead>
+              <tbody id="myGroupsTable">
+                <tr><td colspan="3" class="empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>

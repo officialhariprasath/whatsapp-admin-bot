@@ -1,4 +1,4 @@
-const CACHE_NAME = "wa-admin-bot-v2";
+const CACHE_NAME = "kl-bot-v3";
 const APP_SHELL = [
   "/",
   "/index.html",

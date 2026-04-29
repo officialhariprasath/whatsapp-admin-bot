@@ -10,7 +10,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "WhatsApp Admin Bot with Dashboard",
+  "description": "KL Bot — WhatsApp admin dashboard and session tooling",
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "axios": "^1.15.2",

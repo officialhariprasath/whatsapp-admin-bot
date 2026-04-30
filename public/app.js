@@ -681,10 +681,10 @@ function renderAgentsTable() {
   tbody.innerHTML = agentsData
     .map(
       (a) => `<tr>
-      <td>#${a.id}</td>
-      <td>${a.phone}</td>
-      <td>${new Date(a.created_at).toLocaleDateString()}</td>
-      <td class="actions">
+      <td data-label="ID">#${a.id}</td>
+      <td data-label="Phone">${a.phone}</td>
+      <td data-label="Created">${new Date(a.created_at).toLocaleDateString()}</td>
+      <td data-label="Actions" class="actions">
         <button class="btn btn-secondary btn-sm" onclick="resetAgentPassword(${a.id})"><i class="fa-solid fa-key"></i> Reset pwd</button>
         <button class="btn btn-danger btn-sm" onclick="deleteAgent(${a.id})"><i class="fa-solid fa-trash"></i></button>
       </td>

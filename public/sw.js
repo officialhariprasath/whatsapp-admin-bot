@@ -1,4 +1,4 @@
-const CACHE_NAME = "kl-bot-v5";
+const CACHE_NAME = "kl-bot-v6";
 const APP_SHELL = [
   "/",
   "/index.html",

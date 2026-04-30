@@ -386,6 +386,29 @@ body {
 
 .form-group input:focus { border-color: var(--primary); }
 
+.agents-settings-wrap {
+  padding: 0 24px 20px;
+}
+
+.agents-settings-help {
+  color: var(--text-muted);
+  margin: 16px 0 12px;
+  font-size: 0.9rem;
+}
+
+.agent-create-row {
+  grid-template-columns: 1fr 1fr auto;
+  gap: 12px;
+}
+
+.agent-create-action {
+  min-width: 148px;
+}
+
+.agents-table-wrap {
+  margin-top: 16px;
+}
+
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
@@ -746,5 +769,72 @@ body {
   }
   .update-banner .actions {
     justify-content: flex-end;
+  }
+
+  .agents-settings-wrap {
+    padding: 0 14px 16px;
+  }
+
+  .agents-settings-help {
+    margin: 12px 0;
+  }
+
+  .agent-create-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px 0;
+  }
+
+  .agent-create-action,
+  .agent-create-action .btn {
+    width: 100%;
+  }
+
+  .agents-admin-table thead {
+    display: none;
+  }
+
+  .agents-admin-table,
+  .agents-admin-table tbody,
+  .agents-admin-table tr,
+  .agents-admin-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .agents-admin-table tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    padding: 10px;
+  }
+
+  .agents-admin-table td {
+    border: 0;
+    padding: 8px 4px;
+    white-space: normal;
+  }
+
+  .agents-admin-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 4px;
+  }
+
+  .agents-admin-table td.actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+  }
+
+  .agents-admin-table td.actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 }
